@@ -1,0 +1,1831 @@
+# Othello - Playwright E2Eテスト自動化ツール 詳細設計書
+
+**システム名**: Othello  
+**バージョン**: 2.0  
+**作成日**: 2025年10月13日  
+**対象フェーズ**: フェーズ2（半自動版）  
+**関連文書**: othello-requirements-v2.md v1.0
+
+---
+
+## 1. 設計概要
+
+### 1.1 システム名の由来
+「Othello（オセロ）」という名前は、以下の意味を込めています：
+
+**Playwrightとの繋がり**：
+- Playwright（劇作家）といえばシェイクスピア
+- シェイクスピアの四大悲劇の一つが「オセロ（Othello）」
+- テスト自動化ツール「Playwright」を使う本システムにふさわしい名前
+
+**テスト自動化への意味づけ**：
+- **黒と白の反転**: テストの成功/失敗、実行済み/未実行の状態を表現（オセロゲームの石の反転のように）
+- **戦略的な思考**: テストカバレッジを戦略的に向上させる（オセロゲームの戦略性）
+- **盤面の可視化**: テストの実行状況を盤面のように可視化
+
+### 1.2 設計方針
+- **オーケストレーション特化**: Playwrightエージェントへの指示と結果収集に専念
+- **テスト実行の委譲**: 実際のテスト実行はPlaywrightエージェントに完全委譲
+- **拡張性**: 将来のフェーズ3対応を見据えた設計
+- **可読性**: QA担当者がカスタマイズしやすいコード構造
+
+### 1.3 Othelloの責務
+**Othelloが行うこと**：
+- Playwrightエージェントへのテスト指示生成
+- テスト実行結果の収集とCSV/JSON保存
+- 未実行箇所の分析
+- 次のイテレーションのテスト指示生成
+- 実行ループの管理
+
+**Othelloが行わないこと**：
+- ブラウザの直接操作
+- テストコードの実行
+- セレクタの解決
+- エラーのリトライ処理
+
+### 1.4 アーキテクチャ概要
+```
+┌─────────────────────────────────────────────────────┐
+│              CLI Interface (othello.js)              │
+│          コマンド解析・実行フロー制御                │
+└─────────────────┬───────────────────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│           Config Manager (config.js)                 │
+│     設定ファイル読込・環境変数管理                   │
+└─────────────────┬───────────────────────────────────┘
+                  │
+        ┌─────────┴─────────┬─────────────────┐
+        ▼                   ▼                 ▼
+┌──────────────────┐ ┌────────────────┐ ┌──────────────────┐
+│  Orchestrator    │ │   Analyzer     │ │  Instruction     │
+│   (指示生成)     │ │  (未実行検出)  │ │   Generator      │
+└────────┬─────────┘ └────────┬───────┘ └────────┬─────────┘
+         │                    │                  │
+         │    ┌───────────────┴──────────────────┘
+         │    │
+         ▼    ▼
+┌─────────────────────────────────────────────────────┐
+│           VS Code Playwright Agent                   │
+│   ┌─────────────────────────────────────────┐       │
+│   │ Planner  → Generator → Healer           │       │
+│   │ (テスト考案) (実行)    (修復)           │       │
+│   └─────────────────────────────────────────┘       │
+└─────────────────┬───────────────────────────────────┘
+                  │ 実行結果
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│         Result Collector (result-collector.js)       │
+│            実行結果の収集とパース                    │
+└─────────────────┬───────────────────────────────────┘
+                  │
+        ┌─────────┴─────────┐
+        ▼                   ▼
+┌──────────────────┐ ┌──────────────────┐
+│  CSV Writer      │ │  JSON Logger     │
+│  (CSV保存)       │ │  (JSON保存)      │
+└──────────────────┘ └──────────────────┘
+        │                   │
+        └─────────┬─────────┘
+                  ▼
+        ┌──────────────────┐
+        │    Reporter      │
+        │  (HTML生成)      │
+        └──────────────────┘
+```
+
+---
+
+## 2. モジュール詳細設計
+
+### 2.1 CLI Interface (`bin/othello.js`)
+
+#### 2.1.1 責務
+- コマンドライン引数のパース
+- 各モジュールの呼び出し制御
+- イテレーションループの管理
+- ユーザーとの対話
+
+#### 2.1.2 主要な処理フロー
+```javascript
+#!/usr/bin/env node
+
+const { Command } = require('commander');
+const Orchestrator = require('../src/orchestrator');
+const ResultCollector = require('../src/result-collector');
+const Analyzer = require('../src/analyzer');
+const InstructionGenerator = require('../src/instruction-generator');
+const Reporter = require('../src/reporter');
+const ConfigManager = require('../src/config');
+
+async function main() {
+  const program = new Command();
+  
+  program
+    .name('othello')
+    .description('Playwright E2Eテスト自動化オーケストレーター')
+    .version('2.0.0')
+    .requiredOption('--url <url>', 'テスト対象のURL')
+    .option('--max-iterations <n>', '最大イテレーション回数', '10')
+    .option('--browser <type>', 'ブラウザ種別 (chromium/firefox/webkit)', 'chromium')
+    .option('--output <dir>', 'レポート出力先', './reports')
+    .option('--config <path>', '設定ファイルパス', './config/default.json')
+    .option('--auto-approve', '全イテレーションを自動実行', false)
+    .parse(process.argv);
+
+  const options = program.opts();
+  const maxIterations = parseInt(options.maxIterations);
+
+  try {
+    console.log('🎮 Othello - Playwright E2Eテストオーケストレーター v2.0\n');
+    
+    // 1. 設定ファイルの読み込み
+    console.log('📋 設定ファイルを読み込んでいます...');
+    const config = await ConfigManager.load(options.config);
+    
+    console.log(`🌐 対象URL: ${options.url}`);
+    console.log(`🔧 ブラウザ: ${options.browser}`);
+    console.log(`🔄 最大イテレーション: ${maxIterations}回\n`);
+    
+    // 2. オーケストレーターの初期化
+    const orchestrator = new Orchestrator(config, options);
+    const resultCollector = new ResultCollector(config);
+    const analyzer = new Analyzer(config);
+    const instructionGenerator = new InstructionGenerator(config);
+    const reporter = new Reporter(config);
+    
+    // 3. イテレーションループ
+    for (let iteration = 1; iteration <= maxIterations; iteration++) {
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`🔄 イテレーション ${iteration}/${maxIterations}`);
+      console.log(`${'='.repeat(60)}\n`);
+      
+      // 3.1. Playwrightエージェントへのテスト指示を生成
+      let testInstructions;
+      if (iteration === 1) {
+        // 初回は対象URLのみを指示
+        testInstructions = {
+          iteration: 1,
+          target_url: options.url,
+          instruction: '対象URLの基本的な機能をテストしてください'
+        };
+        console.log('📝 初回実行: 対象URLの基本機能をテスト\n');
+      } else {
+        // 2回目以降は未実行箇所を分析して指示生成
+        console.log('🔍 未実行テストを分析しています...');
+        const coverage = await analyzer.analyze();
+        
+        console.log(`📊 現在のカバレッジ: ${coverage.coverage_summary.percentage}%`);
+        console.log(`📄 未訪問ページ: ${coverage.coverage_summary.unvisited_pages}件`);
+        console.log(`🔘 未操作要素: ${coverage.coverage_summary.untested_elements}件\n`);
+        
+        if (coverage.coverage_summary.unvisited_pages === 0 && 
+            coverage.coverage_summary.untested_elements === 0) {
+          console.log('✨ 全てのテストが完了しました！\n');
+          break;
+        }
+        
+        // テスト指示を生成
+        console.log('📝 次のテスト指示を生成しています...');
+        testInstructions = await instructionGenerator.generate(coverage, iteration);
+        
+        // ユーザー承認（auto-approveでない場合）
+        if (!options.autoApprove) {
+          const approved = await promptUserApproval(testInstructions);
+          if (!approved) {
+            console.log('❌ ユーザーによりキャンセルされました\n');
+            break;
+          }
+        }
+      }
+      
+      // 3.2. Playwrightエージェントにテスト指示を送信
+      console.log('🚀 Playwrightエージェントにテスト指示を送信しています...\n');
+      const agentResult = await orchestrator.executeIteration(
+        options.url,
+        testInstructions,
+        iteration
+      );
+      
+      // 3.3. 実行結果を収集
+      console.log('📥 実行結果を収集しています...');
+      const collectedResult = await resultCollector.collect(agentResult, iteration);
+      
+      // 3.4. 結果をCSV/JSONで保存
+      console.log('💾 実行結果を保存しています...');
+      await resultCollector.saveJSON(collectedResult);
+      await resultCollector.saveCSV(collectedResult);
+      
+      console.log(`✅ イテレーション${iteration}完了`);
+      console.log(`   - テスト実行数: ${collectedResult.tests_executed}件`);
+      console.log(`   - 成功: ${collectedResult.tests_passed}件`);
+      console.log(`   - 失敗: ${collectedResult.tests_failed}件`);
+      if (collectedResult.healer_actions > 0) {
+        console.log(`   - Healer修復: ${collectedResult.healer_actions}件`);
+      }
+    }
+    
+    // 4. 最終レポート生成
+    console.log('\n📊 最終レポートを生成しています...');
+    const reportPath = await reporter.generate();
+    
+    console.log(`✅ レポート生成完了: ${reportPath}`);
+    console.log(`\n🎉 Othello実行完了！\n`);
+    
+  } catch (error) {
+    console.error(`\n❌ エラーが発生しました: ${error.message}\n`);
+    console.error(error.stack);
+    process.exit(1);
+  }
+}
+
+// ユーザー承認プロンプト
+async function promptUserApproval(testInstructions) {
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  console.log('\n次のテスト指示が生成されました:\n');
+  
+  if (testInstructions.test_instructions) {
+    testInstructions.test_instructions.forEach((inst, index) => {
+      console.log(`[${index + 1}] ${inst.target} （優先度: ${inst.priority}）`);
+      console.log(`    ${inst.instruction}`);
+    });
+  }
+  
+  return new Promise((resolve) => {
+    rl.question('\n次のイテレーションを実行しますか？ (y/n): ', (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'y');
+    });
+  });
+}
+
+// 実行
+main().catch(error => {
+  console.error('Fatal error:', error);
+  process.exit(1);
+});
+```
+
+#### 2.1.3 package.json
+```json
+{
+  "name": "othello",
+  "version": "2.0.0",
+  "description": "Playwright E2Eテスト自動化オーケストレーター",
+  "main": "bin/othello.js",
+  "bin": {
+    "othello": "./bin/othello.js"
+  },
+  "scripts": {
+    "start": "node bin/othello.js",
+    "test": "jest"
+  },
+  "keywords": ["playwright", "e2e", "testing", "automation", "orchestrator"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^11.0.0",
+    "winston": "^3.11.0",
+    "dotenv": "^16.3.1",
+    "handlebars": "^4.7.8",
+    "csv-writer": "^1.6.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
+```
+
+---
+
+### 2.2 Config Manager (`src/config.js`)
+
+#### 2.2.1 責務
+- 設定ファイルの読み込みとバリデーション
+- 環境変数の取得と管理
+- Playwrightエージェント連携設定の管理
+
+#### 2.2.2 実装
+```javascript
+const fs = require('fs').promises;
+const path = require('path');
+require('dotenv').config();
+
+class ConfigManager {
+  constructor(configData) {
+    this.config = configData;
+    this.validateConfig();
+  }
+
+  // 設定ファイルの読み込み
+  static async load(configPath) {
+    try {
+      const data = await fs.readFile(configPath, 'utf8');
+      const config = JSON.parse(data);
+      return new ConfigManager(config);
+    } catch (error) {
+      throw new Error(`設定ファイルの読み込みに失敗: ${error.message}`);
+    }
+  }
+
+  // 設定のバリデーション
+  validateConfig() {
+    const required = ['default_browser', 'timeout_seconds', 'max_iterations', 'paths'];
+    for (const key of required) {
+      if (!this.config[key]) {
+        throw new Error(`必須設定項目が不足: ${key}`);
+      }
+    }
+    
+    // Playwrightエージェント設定の確認
+    if (!this.config.playwright_agent) {
+      console.warn('⚠️  Playwrightエージェント設定がありません。デフォルト設定を使用します。');
+      this.config.playwright_agent = {
+        planner_settings: {},
+        healer_settings: {
+          max_retry_attempts: 3
+        }
+      };
+    }
+  }
+
+  // 対象システムの取得
+  getTargetSystem(name) {
+    return this.config.target_systems.find(s => s.name === name);
+  }
+
+  // 認証情報の取得（環境変数から）
+  getCredentials(systemName) {
+    const system = this.getTargetSystem(systemName);
+    if (!system || !system.credentials) {
+      return null;
+    }
+
+    return {
+      username: process.env[system.credentials.username_env],
+      password: process.env[system.credentials.password_env]
+    };
+  }
+
+  // Playwrightエージェント設定の取得
+  getPlaywrightAgentSettings() {
+    return this.config.playwright_agent || {};
+  }
+
+  // Claude API設定の取得
+  getClaudeAPISettings() {
+    return this.config.claude_api || {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      temperature: 0.7
+    };
+  }
+
+  // カバレッジ閾値の取得
+  getCoverageThreshold() {
+    return this.config.coverage_threshold || {
+      target_percentage: 80,
+      stop_if_no_improvement: true
+    };
+  }
+
+  // パスの取得
+  getPath(type) {
+    return this.config.paths[type] || `./${type}`;
+  }
+
+  // 設定値の取得（デフォルト値対応）
+  get(key, defaultValue = null) {
+    return this.config[key] !== undefined ? this.config[key] : defaultValue;
+  }
+}
+
+module.exports = ConfigManager;
+```
+
+#### 2.2.3 設定ファイル例
+```json
+{
+  "default_browser": "chromium",
+  "timeout_seconds": 60,
+  "max_iterations": 10,
+  "screenshot_on_error": true,
+  "paths": {
+    "logs": "./logs",
+    "results": "./results",
+    "test_instructions": "./test-instructions",
+    "reports": "./reports",
+    "screenshots": "./screenshots"
+  },
+  "target_systems": [
+    {
+      "name": "社内システムA",
+      "url": "https://internal-system.company.com",
+      "login_required": true,
+      "credentials": {
+        "username_env": "TEST_USER",
+        "password_env": "TEST_PASS"
+      }
+    }
+  ],
+  "playwright_agent": {
+    "vscode_workspace": "/path/to/workspace",
+    "api_endpoint": "http://localhost:3000/playwright-agent",
+    "planner_settings": {
+      "test_generation_strategy": "comprehensive",
+      "focus_on_edge_cases": true
+    },
+    "healer_settings": {
+      "max_retry_attempts": 3,
+      "auto_fix_selectors": true
+    }
+  },
+  "claude_api": {
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "coverage_threshold": {
+    "target_percentage": 80,
+    "stop_if_no_improvement": true
+  }
+}
+```
+
+---
+
+### 2.3 Orchestrator (`src/orchestrator.js`)
+
+#### 2.3.1 責務
+- Playwrightエージェントへのテスト指示送信
+- エージェントとの通信管理
+- 実行結果の受信
+
+#### 2.3.2 実装
+```javascript
+const axios = require('axios');
+const fs = require('fs').promises;
+const path = require('path');
+
+class Orchestrator {
+  constructor(config, options) {
+    this.config = config;
+    this.options = options;
+    this.agentSettings = config.getPlaywrightAgentSettings();
+  }
+
+  // イテレーション実行
+  async executeIteration(targetUrl, testInstructions, iteration) {
+    console.log(`📡 Playwrightエージェントと通信中...\n`);
+    
+    // テスト指示をファイルに保存
+    await this.saveTestInstructions(testInstructions, iteration);
+    
+    // Playwrightエージェントを呼び出す
+    // 実際の実装では、VS Code拡張のAPIを呼び出すか、
+    // ファイルベースでの連携を行う
+    const result = await this.callPlaywrightAgent(targetUrl, testInstructions);
+    
+    return result;
+  }
+
+  // Playwrightエージェントを呼び出す
+  async callPlaywrightAgent(targetUrl, testInstructions) {
+    // 実装方法1: REST API経由（VS Code拡張がAPIを提供している場合）
+    if (this.agentSettings.api_endpoint) {
+      return await this.callViaAPI(targetUrl, testInstructions);
+    }
+    
+    // 実装方法2: ファイルベース連携（推奨）
+    return await this.callViaFileSystem(targetUrl, testInstructions);
+  }
+
+  // API経由での呼び出し
+  async callViaAPI(targetUrl, testInstructions) {
+    try {
+      const response = await axios.post(this.agentSettings.api_endpoint, {
+        target_url: targetUrl,
+        instructions: testInstructions,
+        browser: this.options.browser,
+        planner_settings: this.agentSettings.planner_settings,
+        healer_settings: this.agentSettings.healer_settings
+      }, {
+        timeout: this.config.get('timeout_seconds', 60) * 1000
+      });
+      
+      return response.data;
+    } catch (error) {
+      throw new Error(`Playwrightエージェント呼び出しエラー: ${error.message}`);
+    }
+  }
+
+  // ファイルシステム経由での呼び出し
+  async callViaFileSystem(targetUrl, testInstructions) {
+    console.log('📁 ファイルベース連携を使用します');
+    console.log('ℹ️  VS CodeでPlaywrightエージェントを手動実行してください\n');
+    
+    // 指示ファイルを作成
+    const instructionPath = path.join(
+      this.config.getPath('test_instructions'),
+      `instruction_iteration-${testInstructions.iteration}.json`
+    );
+    
+    await fs.writeFile(
+      instructionPath,
+      JSON.stringify(testInstructions, null, 2),
+      'utf8'
+    );
+    
+    console.log(`✅ テスト指示ファイルを作成しました: ${instructionPath}`);
+    console.log('\n次の手順でテストを実行してください:');
+    console.log('1. VS Codeを開く');
+    console.log('2. Playwrightエージェントを起動');
+    console.log(`3. 指示ファイル (${instructionPath}) を読み込み`);
+    console.log('4. テストを実行');
+    console.log('5. 結果ファイルが生成されるまで待機\n');
+    
+    // 結果ファイルの出現を待機
+    const resultPath = path.join(
+      this.config.getPath('logs'),
+      `result_iteration-${testInstructions.iteration}.json`
+    );
+    
+    console.log(`⏳ 結果ファイルを待機中: ${resultPath}`);
+    console.log('   （Ctrl+Cでキャンセル）\n');
+    
+    const result = await this.waitForResultFile(resultPath);
+    
+    console.log('✅ 結果ファイルを検出しました\n');
+    
+    return result;
+  }
+
+  // 結果ファイルの出現を待機
+  async waitForResultFile(resultPath, maxWaitMinutes = 30) {
+    const maxWaitMs = maxWaitMinutes * 60 * 1000;
+    const checkIntervalMs = 5000; // 5秒ごとにチェック
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        // ファイルの存在確認
+        await fs.access(resultPath);
+        
+        // ファイルが存在する場合、内容を読み込み
+        const content = await fs.readFile(resultPath, 'utf8');
+        const result = JSON.parse(content);
+        
+        return result;
+      } catch (error) {
+        // ファイルがまだ存在しない場合は待機
+        await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
+      }
+    }
+    
+    throw new Error(`タイムアウト: ${maxWaitMinutes}分以内に結果ファイルが生成されませんでした`);
+  }
+
+  // テスト指示をファイルに保存
+  async saveTestInstructions(testInstructions, iteration) {
+    const instructionsPath = this.config.getPath('test_instructions');
+    
+    // ディレクトリ作成
+    try {
+      await fs.access(instructionsPath);
+    } catch {
+      await fs.mkdir(instructionsPath, { recursive: true });
+    }
+    
+    const filename = `test-instructions_iteration-${iteration}.json`;
+    const filepath = path.join(instructionsPath, filename);
+    
+    await fs.writeFile(filepath, JSON.stringify(testInstructions, null, 2), 'utf8');
+    
+    // Markdown版も保存
+    const markdown = this.convertInstructionsToMarkdown(testInstructions);
+    const mdFilepath = filepath.replace('.json', '.md');
+    await fs.writeFile(mdFilepath, markdown, 'utf8');
+  }
+
+  // テスト指示をMarkdown形式に変換
+  convertInstructionsToMarkdown(testInstructions) {
+    let md = `# テスト指示 - イテレーション ${testInstructions.iteration}\n\n`;
+    md += `生成日時: ${new Date().toLocaleString('ja-JP')}\n\n`;
+    
+    if (testInstructions.target_url) {
+      md += `## 対象URL\n${testInstructions.target_url}\n\n`;
+    }
+    
+    if (testInstructions.instruction) {
+      md += `## 指示\n${testInstructions.instruction}\n\n`;
+    }
+    
+    if (testInstructions.test_instructions) {
+      md += `## 詳細指示\n\n`;
+      testInstructions.test_instructions.forEach((inst, index) => {
+        md += `### ${index + 1}. ${inst.target} （優先度: ${inst.priority}）\n\n`;
+        md += `${inst.instruction}\n\n`;
+        
+        if (inst.focus_areas && inst.focus_areas.length > 0) {
+          md += `重点領域:\n`;
+          inst.focus_areas.forEach(area => {
+            md += `- ${area}\n`;
+          });
+          md += `\n`;
+        }
+      });
+    }
+    
+    return md;
+  }
+}
+
+module.exports = Orchestrator;
+```
+
+---
+
+### 2.4 Result Collector (`src/result-collector.js`)
+
+#### 2.4.1 責務
+- Playwrightエージェントの実行結果の収集
+- 結果のパースと構造化
+- JSON/CSV形式での保存
+
+#### 2.4.2 実装
+```javascript
+const fs = require('fs').promises;
+const path = require('path');
+const createCsvWriter = require('csv-writer').createObjectCsvWriter;
+
+class ResultCollector {
+  constructor(config) {
+    this.config = config;
+  }
+
+  // 実行結果を収集
+  async collect(agentResult, iteration) {
+    // Playwrightエージェントの結果を標準形式に変換
+    const collectedResult = {
+      execution_id: `iteration-${iteration}_${new Date().toISOString()}`,
+      iteration: iteration,
+      target_url: agentResult.target_url || '',
+      browser: agentResult.browser || 'chromium',
+      start_time: agentResult.start_time || new Date().toISOString(),
+      end_time: agentResult.end_time || new Date().toISOString(),
+      duration_seconds: agentResult.duration_seconds || 0,
+      status: agentResult.status || 'unknown',
+      tests_generated_by_planner: agentResult.tests_generated || [],
+      tests_executed: agentResult.tests_executed || 0,
+      tests_passed: agentResult.tests_passed || 0,
+      tests_failed: agentResult.tests_failed || 0,
+      healer_actions: agentResult.healer_actions || 0,
+      playwright_agent_results: {
+        planner_suggestions: agentResult.planner_suggestions || [],
+        generated_tests: agentResult.generated_tests || [],
+        healer_actions: agentResult.healer_details || [],
+        test_details: agentResult.test_details || []
+      }
+    };
+    
+    return collectedResult;
+  }
+
+  // JSON形式で保存
+  async saveJSON(result) {
+    const logsPath = this.config.getPath('logs');
+    await this.ensureDirectory(logsPath);
+    
+    const filename = `${result.execution_id}.json`.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filepath = path.join(logsPath, filename);
+    
+    await fs.writeFile(filepath, JSON.stringify(result, null, 2), 'utf8');
+    
+    console.log(`   ✅ JSONログ: ${filepath}`);
+    
+    return filepath;
+  }
+
+  // CSV形式で保存
+  async saveCSV(result) {
+    const resultsPath = this.config.getPath('results');
+    await this.ensureDirectory(resultsPath);
+    
+    const timestamp = new Date().toISOString().split('T')[0];
+    const csvPath = path.join(resultsPath, `test-results_${timestamp}.csv`);
+    
+    // テスト詳細をCSV行に変換
+    const csvRows = this.convertToCSVRows(result);
+    
+    if (csvRows.length === 0) {
+      console.log('   ⚠️  CSV書き込みスキップ: テストデータなし');
+      return csvPath;
+    }
+    
+    // ファイルが存在するか確認
+    const fileExists = await this.fileExists(csvPath);
+    
+    // CSVライター作成
+    const csvWriter = createCsvWriter({
+      path: csvPath,
+      header: this.getCSVHeaders(),
+      append: fileExists,
+      encoding: 'utf8'
+    });
+    
+    await csvWriter.writeRecords(csvRows);
+    
+    console.log(`   ✅ CSV結果: ${csvPath} (${csvRows.length}件追加)`);
+    
+    return csvPath;
+  }
+
+  // テスト結果をCSV行の配列に変換
+  convertToCSVRows(result) {
+    const rows = [];
+    
+    // test_detailsからCSV行を生成
+    if (result.playwright_agent_results.test_details) {
+      result.playwright_agent_results.test_details.forEach((test, index) => {
+        rows.push({
+          no: `${result.iteration}-${index + 1}`,
+          scenario: test.name || test.description || `テスト${index + 1}`,
+          status: test.status === 'passed' ? '成功' : test.status === 'failed' ? '失敗' : 'エラー',
+          input1: test.inputs && test.inputs[0] ? test.inputs[0] : '',
+          input2: test.inputs && test.inputs[1] ? test.inputs[1] : '',
+          input3: test.inputs && test.inputs[2] ? test.inputs[2] : '',
+          input4: test.inputs && test.inputs[3] ? test.inputs[3] : '',
+          input5: test.inputs && test.inputs[4] ? test.inputs[4] : '',
+          remarks: this.generateRemarks(test, result)
+        });
+      });
+    } else if (result.tests_generated_by_planner) {
+      // test_detailsがない場合、planner提案から簡易的なCSVを生成
+      result.tests_generated_by_planner.forEach((testName, index) => {
+        rows.push({
+          no: `${result.iteration}-${index + 1}`,
+          scenario: `${testName}（Planner提案）`,
+          status: index < result.tests_passed ? '成功' : '失敗',
+          input1: '',
+          input2: '',
+          input3: '',
+          input4: '',
+          input5: '',
+          remarks: ''
+        });
+      });
+    }
+    
+    return rows;
+  }
+
+  // 備考欄の生成
+  generateRemarks(test, result) {
+    const remarks = [];
+    
+    if (test.expected_result) {
+      remarks.push(test.expected_result);
+    }
+    
+    if (test.healed) {
+      remarks.push('Healerにより修復');
+    }
+    
+    if (test.error_message) {
+      remarks.push(`エラー: ${test.error_message}`);
+    }
+    
+    return remarks.join(', ');
+  }
+
+  // CSVヘッダーの定義
+  getCSVHeaders() {
+    return [
+      { id: 'no', title: 'No' },
+      { id: 'scenario', title: 'テスト概要' },
+      { id: 'status', title: '実行結果' },
+      { id: 'input1', title: '入力値1' },
+      { id: 'input2', title: '入力値2' },
+      { id: 'input3', title: '入力値3' },
+      { id: 'input4', title: '入力値4' },
+      { id: 'input5', title: '入力値5' },
+      { id: 'remarks', title: '備考' }
+    ];
+  }
+
+  // ディレクトリの存在確認と作成
+  async ensureDirectory(dirPath) {
+    try {
+      await fs.access(dirPath);
+    } catch {
+      await fs.mkdir(dirPath, { recursive: true });
+    }
+  }
+
+  // ファイルの存在確認
+  async fileExists(filepath) {
+    try {
+      await fs.access(filepath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+module.exports = ResultCollector;
+```
+
+---
+
+### 2.5 Analyzer (`src/analyzer.js`)
+
+#### 2.5.1 責務
+- 実行済みログの読み込みと解析
+- 未実行ページ・要素の検出
+- カバレッジ計算
+
+#### 2.5.2 実装
+```javascript
+const fs = require('fs').promises;
+const path = require('path');
+
+class Analyzer {
+  constructor(config) {
+    this.config = config;
+  }
+
+  // 未実行テストの分析
+  async analyze() {
+    // 1. 全ログファイルを読み込み
+    const logs = await this.loadAllLogs();
+    
+    if (logs.length === 0) {
+      return this.getEmptyCoverage();
+    }
+    
+    // 2. 訪問済みページを抽出
+    const visitedPages = this.extractVisitedPages(logs);
+    
+    // 3. テスト済み機能を抽出
+    const testedFeatures = this.extractTestedFeatures(logs);
+    
+    // 4. 全体の推定ページ数を計算
+    const estimatedTotalPages = this.estimateTotalPages(logs);
+    const estimatedTotalFeatures = this.estimateTotalFeatures(logs);
+    
+    // 5. 未カバー箇所を特定
+    const uncoveredPages = this.findUncoveredPages(visitedPages, estimatedTotalPages);
+    const uncoveredFeatures = this.findUncoveredFeatures(testedFeatures, estimatedTotalFeatures);
+    
+    // 6. カバレッジを計算
+    const coverage = this.calculateCoverage(
+      visitedPages.length,
+      estimatedTotalPages,
+      testedFeatures.length,
+      estimatedTotalFeatures
+    );
+    
+    return {
+      analysis_date: new Date().toISOString(),
+      total_scenarios_executed: logs.length,
+      coverage_summary: {
+        percentage: coverage,
+        visited_pages: visitedPages.length,
+        unvisited_pages: uncoveredPages.length,
+        tested_elements: testedFeatures.length,
+        untested_elements: uncoveredFeatures.length
+      },
+      uncovered: {
+        pages: uncoveredPages,
+        elements: uncoveredFeatures
+      }
+    };
+  }
+
+  // 全ログファイルの読み込み
+  async loadAllLogs() {
+    const logsPath = this.config.getPath('logs');
+    
+    try {
+      const files = await fs.readdir(logsPath);
+      const jsonFiles = files.filter(f => f.endsWith('.json'));
+      
+      const logs = [];
+      for (const file of jsonFiles) {
+        const filePath = path.join(logsPath, file);
+        const content = await fs.readFile(filePath, 'utf8');
+        logs.push(JSON.parse(content));
+      }
+      
+      return logs;
+    } catch (error) {
+      console.log(`⚠️  ログファイルの読み込みエラー: ${error.message}`);
+      return [];
+    }
+  }
+
+  // 訪問済みページの抽出
+  extractVisitedPages(logs) {
+    const pages = new Set();
+    
+    for (const log of logs) {
+      if (log.target_url) {
+        pages.add(log.target_url);
+      }
+      
+      // Playwrightエージェントのテスト詳細から訪問ページを抽出
+      if (log.playwright_agent_results && log.playwright_agent_results.test_details) {
+        for (const test of log.playwright_agent_results.test_details) {
+          if (test.visited_urls) {
+            test.visited_urls.forEach(url => pages.add(url));
+          }
+        }
+      }
+    }
+    
+    return Array.from(pages);
+  }
+
+  // テスト済み機能の抽出
+  extractTestedFeatures(logs) {
+    const features = new Set();
+    
+    for (const log of logs) {
+      // Plannerが生成したテスト名から機能を抽出
+      if (log.tests_generated_by_planner) {
+        log.tests_generated_by_planner.forEach(testName => {
+          features.add(testName);
+        });
+      }
+      
+      // テスト詳細から機能を抽出
+      if (log.playwright_agent_results && log.playwright_agent_results.test_details) {
+        for (const test of log.playwright_agent_results.test_details) {
+          if (test.feature) {
+            features.add(test.feature);
+          }
+        }
+      }
+    }
+    
+    return Array.from(features);
+  }
+
+  // 推定総ページ数を計算
+  estimateTotalPages(logs) {
+    // 簡易的な推定: 訪問済みページ数 × 1.5
+    // 実際には、サイトマップやリンク解析で精度を上げる
+    const visitedCount = this.extractVisitedPages(logs).length;
+    return Math.ceil(visitedCount * 1.5);
+  }
+
+  // 推定総機能数を計算
+  estimateTotalFeatures(logs) {
+    // 簡易的な推定: テスト済み機能数 × 2
+    const testedCount = this.extractTestedFeatures(logs).length;
+    return Math.max(testedCount * 2, 10); // 最低10機能と仮定
+  }
+
+  // 未カバーページの検出
+  findUncoveredPages(visitedPages, estimatedTotal) {
+    const uncovered = [];
+    const uncoveredCount = Math.max(0, estimatedTotal - visitedPages.length);
+    
+    for (let i = 0; i < uncoveredCount; i++) {
+      uncovered.push({
+        type: 'page',
+        name: `未訪問ページ ${i + 1}`,
+        url: 'unknown'
+      });
+    }
+    
+    return uncovered;
+  }
+
+  // 未カバー機能の検出
+  findUncoveredFeatures(testedFeatures, estimatedTotal) {
+    const uncovered = [];
+    const uncoveredCount = Math.max(0, estimatedTotal - testedFeatures.length);
+    
+    for (let i = 0; i < uncoveredCount; i++) {
+      uncovered.push({
+        type: 'element',
+        page: 'unknown',
+        element: `未テスト機能 ${i + 1}`,
+        selector: 'unknown'
+      });
+    }
+    
+    return uncovered;
+  }
+
+  // カバレッジの計算
+  calculateCoverage(visitedPages, totalPages, testedFeatures, totalFeatures) {
+    if (totalPages === 0 && totalFeatures === 0) {
+      return 0;
+    }
+    
+    const pageCoverage = totalPages > 0 ? (visitedPages / totalPages) : 0;
+    const featureCoverage = totalFeatures > 0 ? (testedFeatures / totalFeatures) : 0;
+    
+    // 平均カバレッジ
+    const averageCoverage = ((pageCoverage + featureCoverage) / 2) * 100;
+    
+    return Math.round(averageCoverage * 10) / 10;
+  }
+
+  // 空のカバレッジデータ
+  getEmptyCoverage() {
+    return {
+      analysis_date: new Date().toISOString(),
+      total_scenarios_executed: 0,
+      coverage_summary: {
+        percentage: 0,
+        visited_pages: 0,
+        unvisited_pages: 0,
+        tested_elements: 0,
+        untested_elements: 0
+      },
+      uncovered: {
+        pages: [],
+        elements: []
+      }
+    };
+  }
+}
+
+module.exports = Analyzer;
+```
+
+---
+
+### 2.6 Instruction Generator (`src/instruction-generator.js`)
+
+#### 2.6.1 責務
+- 未実行箇所からテスト指示を生成
+- Claude APIを使用した指示の最適化
+- JSON/Markdown形式での指示出力
+
+#### 2.6.2 実装
+```javascript
+const fs = require('fs').promises;
+const path = require('path');
+
+class InstructionGenerator {
+  constructor(config) {
+    this.config = config;
+  }
+
+  // テスト指示の生成
+  async generate(coverageData, iteration) {
+    // 未カバー箇所からテスト指示を生成
+    const instructions = {
+      iteration: iteration,
+      generated_at: new Date().toISOString(),
+      test_instructions: []
+    };
+    
+    // 未訪問ページからテスト指示を生成
+    if (coverageData.uncovered.pages.length > 0) {
+      const pageInstructions = this.generatePageInstructions(coverageData.uncovered.pages);
+      instructions.test_instructions.push(...pageInstructions);
+    }
+    
+    // 未テスト機能からテスト指示を生成
+    if (coverageData.uncovered.elements.length > 0) {
+      const featureInstructions = this.generateFeatureInstructions(coverageData.uncovered.elements);
+      instructions.test_instructions.push(...featureInstructions);
+    }
+    
+    // Claude APIで指示を最適化（オプション）
+    if (this.config.get('use_claude_for_instructions', false)) {
+      instructions.test_instructions = await this.optimizeWithClaude(instructions.test_instructions);
+    }
+    
+    // 優先度でソート
+    instructions.test_instructions.sort((a, b) => {
+      const priority = { high: 0, medium: 1, low: 2 };
+      return priority[a.priority] - priority[b.priority];
+    });
+    
+    return instructions;
+  }
+
+  // ページ用のテスト指示を生成
+  generatePageInstructions(uncoveredPages) {
+    return uncoveredPages.slice(0, 5).map(page => ({
+      priority: 'high',
+      target: page.name,
+      instruction: `${page.name}にアクセスし、基本的な機能をテストしてください。ページが正しく表示され、主要な要素が動作することを確認してください。`,
+      focus_areas: [
+        'ページの正常な読み込み',
+        '主要UI要素の表示確認',
+        '基本的なインタラクション'
+      ]
+    }));
+  }
+
+  // 機能用のテスト指示を生成
+  generateFeatureInstructions(uncoveredFeatures) {
+    return uncoveredFeatures.slice(0, 5).map(feature => ({
+      priority: 'medium',
+      target: feature.element,
+      instruction: `${feature.element}をテストしてください。正常系と異常系の両方を確認し、期待通りの動作をすることを検証してください。`,
+      focus_areas: [
+        '正常系の動作確認',
+        '異常系のエラーハンドリング',
+        'エッジケースの検証'
+      ]
+    }));
+  }
+
+  // Claude APIで指示を最適化
+  async optimizeWithClaude(instructions) {
+    // Claude APIを使用して、より具体的で効果的なテスト指示に変換
+    // 実装例（実際にはClaude APIを呼び出す）
+    console.log('   ℹ️  Claude APIによる指示最適化はスキップされました');
+    return instructions;
+  }
+}
+
+module.exports = InstructionGenerator;
+```
+
+---
+
+### 2.7 Reporter (`src/reporter.js`)
+
+#### 2.7.1 責務
+- 全イテレーションの結果を集約
+- HTMLレポートの生成
+- カバレッジ推移の可視化
+
+#### 2.7.2 実装
+```javascript
+const fs = require('fs').promises;
+const path = require('path');
+const Handlebars = require('handlebars');
+
+class Reporter {
+  constructor(config) {
+    this.config = config;
+  }
+
+  // レポート生成
+  async generate() {
+    // 1. 全ログを読み込み
+    const logs = await this.loadAllLogs();
+    
+    // 2. サマリーを作成
+    const summary = this.createSummary(logs);
+    
+    // 3. イテレーション別結果を作成
+    const iterations = this.groupByIteration(logs);
+    
+    // 4. HTMLレポートを生成
+    const html = await this.createHTML(summary, iterations);
+    
+    // 5. ファイルに保存
+    const filepath = await this.save(html);
+    
+    return filepath;
+  }
+
+  // 全ログの読み込み
+  async loadAllLogs() {
+    const logsPath = this.config.getPath('logs');
+    
+    try {
+      const files = await fs.readdir(logsPath);
+      const jsonFiles = files.filter(f => f.endsWith('.json'));
+      
+      const logs = [];
+      for (const file of jsonFiles) {
+        const filePath = path.join(logsPath, file);
+        const content = await fs.readFile(filePath, 'utf8');
+        logs.push(JSON.parse(content));
+      }
+      
+      // イテレーション順にソート
+      logs.sort((a, b) => a.iteration - b.iteration);
+      
+      return logs;
+    } catch (error) {
+      console.log(`⚠️  ログファイルの読み込みエラー: ${error.message}`);
+      return [];
+    }
+  }
+
+  // サマリーの作成
+  createSummary(logs) {
+    const totalIterations = new Set(logs.map(l => l.iteration)).size;
+    const totalTests = logs.reduce((sum, l) => sum + (l.tests_executed || 0), 0);
+    const totalPassed = logs.reduce((sum, l) => sum + (l.tests_passed || 0), 0);
+    const totalFailed = logs.reduce((sum, l) => sum + (l.tests_failed || 0), 0);
+    const totalHealerActions = logs.reduce((sum, l) => sum + (l.healer_actions || 0), 0);
+    
+    const finalCoverage = logs.length > 0 ? this.calculateFinalCoverage(logs) : 0;
+    
+    return {
+      totalIterations,
+      totalTests,
+      totalPassed,
+      totalFailed,
+      totalHealerActions,
+      successRate: totalTests > 0 ? Math.round((totalPassed / totalTests) * 100) : 0,
+      finalCoverage,
+      lastExecutionDate: logs.length > 0 ? 
+        new Date(logs[logs.length - 1].start_time).toLocaleString('ja-JP') : '-'
+    };
+  }
+
+  // 最終カバレッジを計算
+  calculateFinalCoverage(logs) {
+    // 簡易実装: 全ログから推定
+    // 実際にはAnalyzerを呼び出して正確な値を取得
+    const uniqueTests = new Set();
+    logs.forEach(log => {
+      if (log.tests_generated_by_planner) {
+        log.tests_generated_by_planner.forEach(test => uniqueTests.add(test));
+      }
+    });
+    
+    // 仮のカバレッジ計算
+    return Math.min(uniqueTests.size * 10, 100);
+  }
+
+  // イテレーション別にグループ化
+  groupByIteration(logs) {
+    const iterations = new Map();
+    
+    logs.forEach(log => {
+      const iter = log.iteration;
+      if (!iterations.has(iter)) {
+        iterations.set(iter, []);
+      }
+      iterations.get(iter).push(log);
+    });
+    
+    const result = [];
+    iterations.forEach((logs, iter) => {
+      const totalTests = logs.reduce((sum, l) => sum + (l.tests_executed || 0), 0);
+      const passed = logs.reduce((sum, l) => sum + (l.tests_passed || 0), 0);
+      const failed = logs.reduce((sum, l) => sum + (l.tests_failed || 0), 0);
+      const healerActions = logs.reduce((sum, l) => sum + (l.healer_actions || 0), 0);
+      
+      const duration = logs.reduce((sum, l) => sum + (l.duration_seconds || 0), 0);
+      
+      result.push({
+        iteration: iter,
+        totalTests,
+        passed,
+        failed,
+        healerActions,
+        duration: Math.round(duration),
+        status: failed === 0 ? 'success' : 'partial',
+        logs: logs,
+        coverage: this.estimateIterationCoverage(iter, result.length + 1)
+      });
+    });
+    
+    return result;
+  }
+
+  // イテレーションのカバレッジを推定
+  estimateIterationCoverage(iteration, totalIterations) {
+    // 簡易的な推定
+    return Math.round((iteration / totalIterations) * 80);
+  }
+
+  // HTMLレポートの生成
+  async createHTML(summary, iterations) {
+    const template = this.getHTMLTemplate();
+    const compiled = Handlebars.compile(template);
+    
+    // Handlebarsヘルパーの登録
+    Handlebars.registerHelper('statusIcon', function(status) {
+      return status === 'success' ? '✓' : '⚠';
+    });
+    
+    Handlebars.registerHelper('coverageChange', function(current, previous) {
+      if (!previous) return '';
+      const change = current - previous;
+      return change > 0 ? `(↑${change}%)` : '';
+    });
+    
+    return compiled({
+      summary,
+      iterations: iterations.map((iter, index) => ({
+        ...iter,
+        previousCoverage: index > 0 ? iterations[index - 1].coverage : 0
+      })),
+      generatedAt: new Date().toLocaleString('ja-JP')
+    });
+  }
+
+  // HTMLテンプレート
+  getHTMLTemplate() {
+    return `
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Othello E2Eテストレポート</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: #f5f5f5;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 40px 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+      font-size: 2.5em;
+      margin-bottom: 10px;
+    }
+    
+    .subtitle {
+      font-size: 1.1em;
+      opacity: 0.9;
+    }
+    
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+    
+    .summary-card {
+      background: white;
+      padding: 25px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    
+    .summary-card h3 {
+      font-size: 0.9em;
+      color: #666;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .summary-card .value {
+      font-size: 2.5em;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .iteration {
+      background: white;
+      padding: 30px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .iteration-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    
+    .iteration-title {
+      font-size: 1.5em;
+      font-weight: bold;
+    }
+    
+    .status {
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 1.2em;
+    }
+    
+    .status.success {
+      background: #c6f6d5;
+      color: #22543d;
+    }
+    
+    .status.partial {
+      background: #feebc8;
+      color: #7c2d12;
+    }
+    
+    .iteration-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin: 20px 0;
+    }
+    
+    .stat-item {
+      text-align: center;
+      padding: 10px;
+      background: #f7fafc;
+      border-radius: 4px;
+    }
+    
+    .stat-label {
+      font-size: 0.85em;
+      color: #666;
+      margin-bottom: 5px;
+    }
+    
+    .stat-value {
+      font-size: 1.5em;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .coverage-badge {
+      display: inline-block;
+      padding: 5px 15px;
+      background: #667eea;
+      color: white;
+      border-radius: 20px;
+      font-weight: bold;
+      margin-left: 10px;
+    }
+    
+    .healer-note {
+      margin-top: 15px;
+      padding: 10px;
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    
+    footer {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎮 Othello E2Eテストレポート</h1>
+      <p class="subtitle">生成日時: {{generatedAt}}</p>
+    </header>
+
+    <section class="summary">
+      <div class="summary-card">
+        <h3>イテレーション数</h3>
+        <div class="value">{{summary.totalIterations}}</div>
+      </div>
+      <div class="summary-card">
+        <h3>総テスト数</h3>
+        <div class="value">{{summary.totalTests}}</div>
+      </div>
+      <div class="summary-card">
+        <h3>成功率</h3>
+        <div class="value">{{summary.successRate}}%</div>
+      </div>
+      <div class="summary-card">
+        <h3>Healer修復</h3>
+        <div class="value">{{summary.totalHealerActions}}</div>
+      </div>
+      <div class="summary-card">
+        <h3>最終カバレッジ</h3>
+        <div class="value">{{summary.finalCoverage}}%</div>
+      </div>
+    </section>
+
+    <h2 style="margin-bottom: 20px;">📋 イテレーション別結果</h2>
+
+    {{#each iterations}}
+    <div class="iteration">
+      <div class="iteration-header">
+        <div>
+          <span class="iteration-title">イテレーション {{iteration}}</span>
+          <span class="coverage-badge">カバレッジ: {{coverage}}% {{coverageChange coverage previousCoverage}}</span>
+        </div>
+        <div class="status {{status}}">{{statusIcon status}}</div>
+      </div>
+
+      <div class="iteration-stats">
+        <div class="stat-item">
+          <div class="stat-label">実行時間</div>
+          <div class="stat-value">{{duration}}秒</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">テスト数</div>
+          <div class="stat-value">{{totalTests}}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">成功</div>
+          <div class="stat-value" style="color: #48bb78;">{{passed}}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">失敗</div>
+          <div class="stat-value" style="color: #f56565;">{{failed}}</div>
+        </div>
+      </div>
+
+      {{#if healerActions}}
+      <div class="healer-note">
+        🔧 Healerが{{healerActions}}件のテストを自動修復しました
+      </div>
+      {{/if}}
+    </div>
+    {{/each}}
+
+    <footer>
+      <p>Generated by Othello v2.0</p>
+    </footer>
+  </div>
+</body>
+</html>
+    `;
+  }
+
+  // HTMLファイルに保存
+  async save(html) {
+    const reportsPath = this.config.getPath('reports');
+    
+    // ディレクトリ作成
+    try {
+      await fs.access(reportsPath);
+    } catch {
+      await fs.mkdir(reportsPath, { recursive: true });
+    }
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `report_${timestamp}.html`;
+    const filepath = path.join(reportsPath, filename);
+    
+    await fs.writeFile(filepath, html, 'utf8');
+    
+    return filepath;
+  }
+}
+
+module.exports = Reporter;
+```
+
+---
+
+## 3. データモデル
+
+### 3.1 テスト指示（TestInstruction）
+```typescript
+interface TestInstruction {
+  iteration: number;              // イテレーション番号
+  generated_at: string;           // 生成日時（ISO 8601）
+  target_url?: string;            // 対象URL（初回のみ）
+  instruction?: string;           // 全体指示（初回のみ）
+  test_instructions: {            // 詳細指示（2回目以降）
+    priority: 'high' | 'medium' | 'low';
+    target: string;               // テスト対象
+    instruction: string;          // 指示内容
+    focus_areas: string[];        // 重点領域
+  }[];
+}
+```
+
+### 3.2 実行結果（ExecutionResult）
+```typescript
+interface ExecutionResult {
+  execution_id: string;           // 実行ID
+  iteration: number;              // イテレーション番号
+  target_url: string;             // 対象URL
+  browser: string;                // ブラウザ種別
+  start_time: string;             // 開始時刻（ISO 8601）
+  end_time: string;               // 終了時刻（ISO 8601）
+  duration_seconds: number;       // 実行時間（秒）
+  status: 'success' | 'failure';  // 実行結果
+  tests_generated_by_planner: string[];  // Plannerが生成したテスト名
+  tests_executed: number;         // 実行テスト数
+  tests_passed: number;           // 成功数
+  tests_failed: number;           // 失敗数
+  healer_actions: number;         // Healer修復数
+  playwright_agent_results: {     // Playwrightエージェントの詳細結果
+    planner_suggestions: string[];
+    generated_tests: any[];
+    healer_details: any[];
+    test_details: TestDetail[];
+  };
+}
+```
+
+### 3.3 テスト詳細（TestDetail）
+```typescript
+interface TestDetail {
+  name: string;                   // テスト名
+  description?: string;           // テスト説明
+  status: 'passed' | 'failed' | 'error';  // テスト結果
+  duration_seconds: number;       // 実行時間
+  inputs?: string[];              // 入力値
+  expected_result?: string;       // 期待結果
+  actual_result?: string;         // 実際の結果
+  error_message?: string;         // エラーメッセージ
+  healed?: boolean;               // Healerによる修復フラグ
+  visited_urls?: string[];        // 訪問したURL
+  feature?: string;               // テストした機能
+}
+```
+
+### 3.4 カバレッジデータ（CoverageData）
+```typescript
+interface CoverageData {
+  analysis_date: string;          // 分析日時
+  total_scenarios_executed: number; // 実行済みイテレーション数
+  coverage_summary: {
+    percentage: number;           // カバレッジ率（％）
+    visited_pages: number;        // 訪問済みページ数
+    unvisited_pages: number;      // 未訪問ページ数
+    tested_elements: number;      // テスト済み要素数
+    untested_elements: number;    // 未テスト要素数
+  };
+  uncovered: {
+    pages: UncoveredPage[];       // 未訪問ページ一覧
+    elements: UncoveredElement[]; // 未操作要素一覧
+  };
+}
+```
+
+---
+
+## 4. Playwrightエージェントとの連携仕様
+
+### 4.1 連携方法
+
+#### 4.1.1 ファイルベース連携（推奨）
+```
+othello/
+├── test-instructions/
+│   └── instruction_iteration-N.json  # Othelloが作成
+└── logs/
+    └── result_iteration-N.json       # Playwrightエージェントが作成
+```
+
+**フロー**：
+1. Othelloが `instruction_iteration-N.json` を作成
+2. ユーザーがVS CodeでPlaywrightエージェントを実行
+3. エージェントが指示ファイルを読み込み、テスト実行
+4. エージェントが `result_iteration-N.json` を作成
+5. Othelloが結果ファイルを検出・読み込み
+
+#### 4.1.2 API連携（将来対応）
+VS Code拡張がREST APIを提供する場合：
+```javascript
+POST http://localhost:3000/playwright-agent
+Content-Type: application/json
+
+{
+  "target_url": "https://example.com",
+  "instructions": { ... },
+  "browser": "chromium"
+}
+```
+
+### 4.2 期待される結果フォーマット
+
+Playwrightエージェントが生成すべき結果ファイル（`result_iteration-N.json`）:
+```json
+{
+  "iteration": 1,
+  "target_url": "https://example.com",
+  "browser": "chromium",
+  "start_time": "2025-10-13T14:30:00Z",
+  "end_time": "2025-10-13T14:35:00Z",
+  "duration_seconds": 300,
+  "status": "success",
+  "tests_generated": [
+    "ログイン機能の正常系テスト",
+    "ログイン機能の異常系テスト"
+  ],
+  "tests_executed": 2,
+  "tests_passed": 2,
+  "tests_failed": 0,
+  "healer_actions": 0,
+  "planner_suggestions": ["..."],
+  "generated_tests": ["..."],
+  "healer_details": [],
+  "test_details": [
+    {
+      "name": "ログイン機能の正常系テスト",
+      "status": "passed",
+      "duration_seconds": 15,
+      "inputs": ["testuser", "password123"],
+      "expected_result": "ダッシュボードに遷移",
+      "visited_urls": ["https://example.com/login", "https://example.com/dashboard"],
+      "feature": "ログイン"
+    }
+  ]
+}
+```
+
+---
+
+## 5. エラーハンドリング
+
+### 5.1 エラー分類
+| エラー種別 | 説明 | 対応 |
+|-----------|------|------|
+| ConfigError | 設定ファイルの読み込み失敗 | エラーメッセージを表示して終了 |
+| AgentConnectionError | Playwrightエージェントとの通信失敗 | リトライ後、エラーメッセージ表示 |
+| ResultTimeoutError | 結果ファイルのタイムアウト | タイムアウト時間を表示し、手動確認を促す |
+| ParseError | 結果ファイルのパースエラー | ファイル形式エラーを表示 |
+
+---
+
+## 6. テスト戦略
+
+### 6.1 ユニットテスト
+```javascript
+// __tests__/orchestrator.test.js
+describe('Orchestrator', () => {
+  test('テスト指示をファイルに保存', async () => {
+    const orchestrator = new Orchestrator(config, options);
+    const instructions = { iteration: 1, target_url: 'https://example.com' };
+    
+    await orchestrator.saveTestInstructions(instructions, 1);
+    
+    // ファイルが作成されたことを確認
+    const filePath = path.join(config.getPath('test_instructions'), 'test-instructions_iteration-1.json');
+    const exists = await fs.access(filePath).then(() => true).catch(() => false);
+    expect(exists).toBe(true);
+  });
+});
+```
+
+---
+
+## 7. デプロイメント
+
+### 7.1 インストール手順
+```bash
+# 1. リポジトリのクローン
+git clone https://github.com/k-sakQA/Othello.git
+cd Othello
+
+# 2. 依存パッケージのインストール
+npm install
+
+# 3. 環境変数の設定
+cp .env.example .env
+# .envファイルを編集
+
+# 4. グローバルインストール（オプション）
+npm link
+
+# 5. VS CodeでPlaywrightエージェント拡張をインストール
+```
+
+### 7.2 動作確認
+```bash
+# テスト実行
+othello --url https://example.com --max-iterations 1
+```
+
+---
+
+## 8. 改訂履歴
+| バージョン | 日付 | 変更内容 | 作成者 |
+|-----------|------|---------|--------|
+| 2.0 | 2025-10-13 | オーケストレーター版として全面改訂 | Claude |
+| 1.0 | 2025-10-13 | 初版作成 | Claude |
+
+---
+
+以上
