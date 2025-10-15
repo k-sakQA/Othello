@@ -1,0 +1,18 @@
+{
+  "iteration": 1,
+  "generated_at": "2025-10-15T00:00:00Z",
+  "target_url": "https://playwright.dev/",
+  "instruction": "Playwrightの公式サイトにアクセスし、基本的な機能をテストしてください",
+  "test_instructions": [
+    {
+      "priority": "high",
+      "target": "トップページ",
+      "instruction": "タイトルとナビゲーションが正しく表示されることを確認してください",
+      "focus_areas": [
+        "ページの正常な読み込み",
+        "主要UI要素の表示確認",
+        "リンクの動作確認"
+      ]
+    }
+  ]
+}

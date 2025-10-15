@@ -1,0 +1,45 @@
+{
+  "_comment": "このファイルは設定例です。実際の設定は default.json または .env ファイルで行ってください。",
+  "default_browser": "chromium",
+  "timeout_seconds": 60,
+  "max_iterations": 10,
+  "screenshot_on_error": true,
+  "paths": {
+    "logs": "./logs",
+    "results": "./results",
+    "test_instructions": "./test-instructions",
+    "reports": "./reports",
+    "screenshots": "./screenshots"
+  },
+  "target_systems": [
+    {
+      "name": "your-app",
+      "url": "https://your-app.example.com",
+      "credentials": {
+        "username_env": "YOUR_APP_USERNAME",
+        "password_env": "YOUR_APP_PASSWORD"
+      }
+    }
+  ],
+  "playwright_agent": {
+    "vscode_workspace": "/path/to/your/workspace",
+    "api_endpoint": "http://localhost:3000/playwright-agent",
+    "planner_settings": {
+      "max_test_scenarios": 10,
+      "focus_on_edge_cases": true
+    },
+    "healer_settings": {
+      "max_retry_attempts": 3,
+      "auto_heal": true
+    }
+  },
+  "claude_api": {
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "coverage_threshold": {
+    "target_percentage": 80,
+    "stop_if_no_improvement": true
+  }
+}
