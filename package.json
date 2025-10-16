@@ -2,7 +2,7 @@
   "name": "othello",
   "version": "2.0.0",
   "description": "Playwright E2Eテスト自動化オーケストレーター",
-  "main": "bin/othello.js",
+  "main": "index.js",
   "bin": {
     "othello": "./bin/othello.js"
   },
