@@ -9,17 +9,19 @@ const path = require('path');
 class PlaywrightAgent {
   /**
    * @param {ConfigManager} config - 設定マネージャー
+   * @param {Object} options - オプション設定
+   * @param {boolean} options.mockMode - モックモードを強制（デフォルト: エンドポイントの有無で自動判定）
    */
-  constructor(config) {
+  constructor(config, options = {}) {
     this.config = config;
     this.browser = config.config.default_browser || 'chromium';
     this.timeout = (config.config.timeout_seconds || 300) * 1000; // ミリ秒に変換
     
-    // Playwright MCPエンドポイント（将来の実装用）
+    // Playwright MCPエンドポイント
     this.mcpEndpoint = config.config.playwright_agent?.api_endpoint || null;
     
-    // モックモード（MCPサーバーが利用できない場合）
-    this.mockMode = !this.mcpEndpoint;
+    // モックモード（オプションで上書き可能、デフォルトはエンドポイントの有無で判定）
+    this.mockMode = options.mockMode !== undefined ? options.mockMode : !this.mcpEndpoint;
   }
 
   /**
@@ -113,20 +115,165 @@ class PlaywrightAgent {
   }
 
   /**
-   * MCP サーバーを呼び出し（将来の実装）
+   * MCP サーバーを呼び出し
    * @param {Object} instruction - テスト指示
    * @param {number} startTime - 開始時刻
    * @returns {Promise<Object>} 実行結果
    */
   async callMCPServer(instruction, startTime) {
-    // TODO: Playwright MCPサーバーとのHTTP通信を実装
-    // const axios = require('axios');
-    // const response = await axios.post(this.mcpEndpoint, {
-    //   method: `playwright/${instruction.type}`,
-    //   params: instruction
-    // });
+    const axios = require('axios');
     
-    throw new Error('MCP Server integration not yet implemented');
+    try {
+      // アクションタイプをMCPツール名にマッピング
+      const toolMapping = {
+        navigate: 'browser_navigate',
+        click: 'browser_click',
+        fill: 'browser_type',
+        screenshot: 'browser_take_screenshot',
+        evaluate: 'browser_evaluate',
+        wait: 'browser_wait_for'
+      };
+
+      const toolName = toolMapping[instruction.type];
+      if (!toolName) {
+        throw new Error(`Unsupported instruction type: ${instruction.type}`);
+      }
+
+      // MCPリクエストパラメータを構築
+      const mcpRequest = {
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: this.buildMCPArguments(instruction)
+        }
+      };
+
+      // MCPサーバーにリクエスト送信
+      const response = await axios.post(
+        this.mcpEndpoint,
+        mcpRequest,
+        {
+          timeout: this.timeout,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      // レスポンスを解析
+      return this.parseMCPResponse(response.data, instruction, startTime);
+
+    } catch (error) {
+      // エラーハンドリング
+      return {
+        success: false,
+        instruction: instruction.description || instruction.type,
+        error: error.message || String(error),
+        timestamp: new Date().toISOString(),
+        duration_ms: Date.now() - startTime
+      };
+    }
+  }
+
+  /**
+   * MCPリクエストの引数を構築
+   * @param {Object} instruction - テスト指示
+   * @returns {Object} MCP引数
+   */
+  buildMCPArguments(instruction) {
+    const intent = instruction.description || instruction.type;
+
+    switch (instruction.type) {
+      case 'navigate':
+        return {
+          url: instruction.url,
+          intent: intent
+        };
+
+      case 'click':
+        return {
+          element: intent,
+          ref: instruction.selector,
+          intent: intent
+        };
+
+      case 'fill':
+        return {
+          element: intent,
+          ref: instruction.selector,
+          text: instruction.value,
+          intent: intent
+        };
+
+      case 'screenshot':
+        return {
+          filename: instruction.path
+        };
+
+      case 'evaluate':
+        return {
+          function: instruction.script,
+          intent: intent
+        };
+
+      case 'wait':
+        return {
+          time: instruction.duration / 1000, // ミリ秒→秒
+          intent: intent
+        };
+
+      default:
+        return { intent: intent };
+    }
+  }
+
+  /**
+   * MCPレスポンスを解析
+   * @param {Object} data - MCPレスポンスデータ
+   * @param {Object} instruction - テスト指示
+   * @param {number} startTime - 開始時刻
+   * @returns {Object} 実行結果
+   */
+  parseMCPResponse(data, instruction, startTime) {
+    // レスポンス検証
+    if (!data || !data.content || data.content.length === 0) {
+      return {
+        success: false,
+        instruction: instruction.description || instruction.type,
+        error: 'Invalid response from MCP server: empty content',
+        timestamp: new Date().toISOString(),
+        duration_ms: Date.now() - startTime
+      };
+    }
+
+    // コンテンツから結果を抽出
+    const content = data.content[0];
+    let result;
+
+    if (content.type === 'text') {
+      try {
+        result = JSON.parse(content.text);
+      } catch (e) {
+        result = { success: true, data: content.text };
+      }
+    } else if (content.type === 'image') {
+      result = {
+        success: true,
+        image: content.data,
+        mimeType: content.mimeType
+      };
+    } else {
+      result = { success: true, data: content };
+    }
+
+    // 統一形式に変換
+    return {
+      success: result.success !== false,
+      instruction: instruction.description || instruction.type,
+      details: result,
+      timestamp: new Date().toISOString(),
+      duration_ms: Date.now() - startTime
+    };
   }
 
   /**

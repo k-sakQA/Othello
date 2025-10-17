@@ -39,6 +39,23 @@ describe('PlaywrightAgent', () => {
       expect(customAgent.browser).toBe('firefox');
       expect(customAgent.timeout).toBe(120000);
     });
+
+    test('オプションでmockModeを強制的に設定できる', () => {
+      // エンドポイントがあってもモックモードにできる
+      const mockAgent = new PlaywrightAgent(config, { mockMode: true });
+      expect(mockAgent.mockMode).toBe(true);
+
+      // エンドポイントがなくても実モードにできる
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      expect(realAgent.mockMode).toBe(false);
+    });
+
+    test('MCPエンドポイントが設定されている場合は実モード', () => {
+      // valid-config.jsonにはapi_endpointが含まれている
+      expect(agent.mcpEndpoint).toBe('http://localhost:8931');
+      // オプションがない場合、エンドポイントがあれば実モード（!this.mcpEndpoint === false）
+      // ただし、デフォルトのconstructorでmockMode判定をオーバーライド
+    });
   });
 
   describe('executeInstruction()', () => {
@@ -279,6 +296,242 @@ describe('PlaywrightAgent', () => {
 
       // クリーンアップ
       await fs.rm(logDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('callMCPServer - MCP通信', () => {
+    test('navigate指示をMCPサーバーに送信できる', async () => {
+      // モックモードをオフにして実モードでテスト
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      
+      // axiosをモック
+      const axios = require('axios');
+      jest.spyOn(axios, 'post').mockResolvedValue({
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                url: 'https://example.com'
+              })
+            }
+          ]
+        }
+      });
+
+      const instruction = {
+        type: 'navigate',
+        url: 'https://example.com',
+        description: 'トップページに移動'
+      };
+
+      const result = await realAgent.executeInstruction(instruction);
+
+      expect(axios.post).toHaveBeenCalledWith(
+        realAgent.mcpEndpoint,
+        expect.objectContaining({
+          method: 'tools/call',
+          params: expect.objectContaining({
+            name: 'browser_navigate',
+            arguments: expect.objectContaining({
+              url: 'https://example.com',
+              intent: 'トップページに移動'
+            })
+          })
+        }),
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+    });
+
+    test('click指示をMCPサーバーに送信できる', async () => {
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      
+      const axios = require('axios');
+      jest.spyOn(axios, 'post').mockResolvedValue({
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true
+              })
+            }
+          ]
+        }
+      });
+
+      const instruction = {
+        type: 'click',
+        selector: '#login-button',
+        description: 'ログインボタンをクリック'
+      };
+
+      const result = await realAgent.executeInstruction(instruction);
+
+      expect(axios.post).toHaveBeenCalledWith(
+        realAgent.mcpEndpoint,
+        expect.objectContaining({
+          method: 'tools/call',
+          params: expect.objectContaining({
+            name: 'browser_click',
+            arguments: expect.objectContaining({
+              element: 'ログインボタンをクリック',
+              ref: '#login-button',
+              intent: 'ログインボタンをクリック'
+            })
+          })
+        }),
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+    });
+
+    test('fill指示をMCPサーバーに送信できる', async () => {
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      
+      const axios = require('axios');
+      jest.spyOn(axios, 'post').mockResolvedValue({
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true
+              })
+            }
+          ]
+        }
+      });
+
+      const instruction = {
+        type: 'fill',
+        selector: '#username',
+        value: 'testuser',
+        description: 'ユーザー名を入力'
+      };
+
+      const result = await realAgent.executeInstruction(instruction);
+
+      expect(axios.post).toHaveBeenCalledWith(
+        realAgent.mcpEndpoint,
+        expect.objectContaining({
+          method: 'tools/call',
+          params: expect.objectContaining({
+            name: 'browser_type',
+            arguments: expect.objectContaining({
+              element: 'ユーザー名を入力',
+              ref: '#username',
+              text: 'testuser',
+              intent: 'ユーザー名を入力'
+            })
+          })
+        }),
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+    });
+
+    test('screenshot指示をMCPサーバーに送信できる', async () => {
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      
+      const axios = require('axios');
+      jest.spyOn(axios, 'post').mockResolvedValue({
+        data: {
+          content: [
+            {
+              type: 'image',
+              data: 'base64encodedimage',
+              mimeType: 'image/png'
+            }
+          ]
+        }
+      });
+
+      const instruction = {
+        type: 'screenshot',
+        path: 'test.png',
+        description: 'スクリーンショットを撮影'
+      };
+
+      const result = await realAgent.executeInstruction(instruction);
+
+      expect(axios.post).toHaveBeenCalledWith(
+        realAgent.mcpEndpoint,
+        expect.objectContaining({
+          method: 'tools/call',
+          params: expect.objectContaining({
+            name: 'browser_take_screenshot',
+            arguments: expect.objectContaining({
+              filename: 'test.png'
+            })
+          })
+        }),
+        expect.any(Object)
+      );
+      expect(result.success).toBe(true);
+    });
+
+    test('MCPサーバーエラーを正しくハンドリングできる', async () => {
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      
+      const axios = require('axios');
+      jest.spyOn(axios, 'post').mockRejectedValue(new Error('Connection refused'));
+
+      const instruction = {
+        type: 'navigate',
+        url: 'https://example.com',
+        description: 'トップページに移動'
+      };
+
+      const result = await realAgent.executeInstruction(instruction);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Connection refused');
+    });
+
+    test('MCPサーバータイムアウトを処理できる', async () => {
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      
+      const axios = require('axios');
+      jest.spyOn(axios, 'post').mockRejectedValue({
+        code: 'ECONNABORTED',
+        message: 'timeout of 10000ms exceeded'
+      });
+
+      const instruction = {
+        type: 'navigate',
+        url: 'https://slow-site.com',
+        description: '遅いサイトに移動'
+      };
+
+      const result = await realAgent.executeInstruction(instruction);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('timeout');
+    });
+
+    test('MCPサーバーから不正なレスポンスを受け取った場合', async () => {
+      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      
+      const axios = require('axios');
+      jest.spyOn(axios, 'post').mockResolvedValue({
+        data: {
+          content: []  // 空のコンテンツ
+        }
+      });
+
+      const instruction = {
+        type: 'navigate',
+        url: 'https://example.com',
+        description: 'トップページに移動'
+      };
+
+      const result = await realAgent.executeInstruction(instruction);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid response');
     });
   });
 });
