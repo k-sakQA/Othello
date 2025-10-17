@@ -32,9 +32,10 @@ class Orchestrator {
 
   /**
    * テストの全体的な実行サイクルを管理
+   * @param {string} targetUrl - テスト対象URL（オプション）
    * @returns {Promise<Object>} テスト実行の総合結果
    */
-  async execute() {
+  async execute(targetUrl = null) {
     const coverageHistory = [];
     const coverageReports = [];
     let totalIterations = 0;
@@ -61,20 +62,30 @@ class Orchestrator {
           break;
         }
 
-        // Playwrightエージェントでテストを生成・実行
-        let testResults = instructions;
-        if (this.playwrightAgent && this.playwrightAgent.generateTests) {
-          testResults = await this.playwrightAgent.generateTests(instructions);
+        // Playwrightエージェントでテストを実行
+        let testResults = [];
+        if (this.playwrightAgent) {
+          // 指示を実行可能なテストに変換
+          for (const instruction of instructions) {
+            const testInstruction = this.convertInstructionToTest(instruction, targetUrl, totalIterations + 1);
+            const result = await this.playwrightAgent.executeTest(testInstruction);
+            testResults.push(result);
+            
+            // ログを保存
+            const logsDir = this.config.getPath('logs');
+            const logPath = path.join(logsDir, `iteration-${totalIterations + 1}-${result.test_id}.json`);
+            await this.playwrightAgent.saveLog(result, logPath);
+          }
         }
 
         // 各反復の結果を記録
         const iterationResult = {
           iteration: totalIterations + 1,
-          playwright_agent_results: {
-            generated_tests: testResults,
-            test_details: []
-          },
-          status: 'success'
+          instructions: instructions.length,
+          tests_executed: testResults.length,
+          tests_passed: testResults.filter(r => r.success).length,
+          tests_failed: testResults.filter(r => !r.success).length,
+          status: testResults.every(r => r.success) ? 'success' : 'partial_success'
         };
 
         await this.recordIteration(iterationResult);
@@ -126,6 +137,46 @@ class Orchestrator {
     }
 
     return instructions;
+  }
+
+  /**
+   * テスト指示を実行可能なテストに変換
+   * @param {Object} instruction - InstructionGeneratorからの指示
+   * @param {string} targetUrl - テスト対象URL
+   * @param {number} iteration - イテレーション番号
+   * @returns {Object} Playwright Agentが実行できるテスト指示
+   */
+  convertInstructionToTest(instruction, targetUrl, iteration) {
+    const testId = `test-iter${iteration}-${Date.now()}`;
+    
+    // 指示テキストから基本的なアクションを生成
+    const actions = [];
+    
+    // ナビゲーション
+    if (targetUrl || instruction.target_url) {
+      actions.push({
+        type: 'navigate',
+        url: targetUrl || instruction.target_url,
+        description: `${instruction.target_url || targetUrl}に移動`
+      });
+    }
+    
+    // 指示内容からアクションを推測
+    if (instruction.priority === 'high' && instruction.target_page) {
+      actions.push({
+        type: 'screenshot',
+        path: `./screenshots/iter${iteration}-${instruction.target_page.replace(/\//g, '-')}.png`,
+        description: `${instruction.target_page}のスクリーンショット`
+      });
+    }
+    
+    return {
+      test_id: testId,
+      target_url: targetUrl || instruction.target_url || '',
+      scenario: instruction.instruction,
+      priority: instruction.priority,
+      actions
+    };
   }
 
   /**
