@@ -22,7 +22,7 @@
   ],
   "playwright_agent": {
     "vscode_workspace": "/path/to/workspace",
-    "api_endpoint": "http://localhost:3000/playwright-agent",
+    "api_endpoint": "http://localhost:8931/mcp",
     "planner_settings": {
       "max_test_scenarios": 10,
       "focus_on_edge_cases": true
