@@ -55,7 +55,8 @@ class Orchestrator {
         }
 
         // テスト指示の生成
-        const instructions = await this.generateInstructions(coverageData);
+        const instructionsResult = await this.generateInstructions(coverageData);
+        const instructions = instructionsResult.test_instructions || [];
 
         if (instructions.length === 0) {
           exitReason = 'full_coverage';
@@ -120,14 +121,8 @@ class Orchestrator {
    * @returns {Promise<Array>} テスト指示の配列
    */
   async generateInstructions(coverageData) {
-    const { uncovered = { pages: [], elements: [] } } = coverageData;
-
-    // 未カバーページと未カバー機能がない場合は空配列を返す
-    if (uncovered.pages.length === 0 && uncovered.elements.length === 0) {
-      return [];
-    }
-
     // InstructionGeneratorを使用して指示を生成
+    // generateメソッドは内部で未カバー領域をチェックし、必要に応じて指示を生成する
     const instructions = await this.instructionGenerator.generate(coverageData);
 
     // Claude APIで最適化（オプション）

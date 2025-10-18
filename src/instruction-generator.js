@@ -19,15 +19,26 @@ class InstructionGenerator {
     const testInstructions = [];
 
     // 未カバーページからの指示生成
-    if (coverageData.uncovered.pages && coverageData.uncovered.pages.length > 0) {
+    if (coverageData.uncovered && coverageData.uncovered.pages && coverageData.uncovered.pages.length > 0) {
       const pageInstructions = this.generatePageInstructions(coverageData.uncovered.pages);
       testInstructions.push(...pageInstructions);
     }
 
     // 未カバー機能からの指示生成
-    if (coverageData.uncovered.elements && coverageData.uncovered.elements.length > 0) {
+    if (coverageData.uncovered && coverageData.uncovered.elements && coverageData.uncovered.elements.length > 0) {
       const featureInstructions = this.generateFeatureInstructions(coverageData.uncovered.elements);
       testInstructions.push(...featureInstructions);
+    }
+
+    // 初回実行時や未カバー領域がない場合は、基本的な探索的テストを生成
+    if (testInstructions.length === 0) {
+      testInstructions.push({
+        priority: 'high',
+        target: 'Initial Exploration',
+        instruction: '基本的なページ探索とUI要素の確認',
+        type: 'page_coverage',
+        description: 'ページを開いて基本的な要素を確認する'
+      });
     }
 
     // 優先度でソート（high → medium → low）
