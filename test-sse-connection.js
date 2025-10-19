@@ -28,11 +28,15 @@ async function main() {
     console.log('✅ Initialize成功:', JSON.stringify(initResult, null, 2));
     console.log();
 
-    // Step 2.5: Send initialized notification (スキップ - サーバーがサポートしていない可能性)
-    // console.log('Step 2.5: Send initialized notification');
-    // await client.sendNotification('notifications/initialized');
-    // console.log('✅ Initialized notification sent');
-    // console.log();
+    // Step 2.5: Send initialized notification (MCP仕様で必須)
+    console.log('Step 2.5: Send initialized notification');
+    try {
+      await client.sendNotification('notifications/initialized');
+      console.log('✅ Initialized notification sent');
+    } catch (error) {
+      console.warn('⚠️ Initialized notification failed (may be optional):', error.message);
+    }
+    console.log();
 
     // Step 3: Tools list
     console.log('Step 3: Tools list');

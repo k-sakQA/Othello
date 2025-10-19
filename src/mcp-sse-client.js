@@ -78,7 +78,7 @@ class MCPSSEClient {
   }
 
   /**
-   * セッションIDを使ってSSE接続を再確立
+   * セッションIDを使ってSSE接続を再確立（永続化）
    * @returns {Promise<void>}
    */
   async reconnect() {
@@ -92,7 +92,8 @@ class MCPSSEClient {
       responseType: 'stream',
       headers: {
         'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
       }
     });
 
@@ -229,7 +230,8 @@ class MCPSSEClient {
 
       this.pendingRequests.set(id, { resolve, reject, timeout });
 
-      // HTTPリクエストで送信（SSEエンドポイントではなく、メインエンドポイント）
+      // HTTPリクエストで送信
+      // 注意：レスポンスはPOST自体から返される（SSE形式の文字列として）
       axios.post(`${this.baseUrl}/mcp`, request, {
         headers: {
           'Content-Type': 'application/json',
@@ -237,11 +239,11 @@ class MCPSSEClient {
           'X-Session-ID': this.sessionId
         }
       }).then((response) => {
-        // POSTレスポンス自体にSSEデータが含まれている可能性
-        console.log('POST response received:', typeof response.data, response.data.substring ? response.data.substring(0, 200) : response.data);
+        console.log('POST response received');
         
-        // SSE形式のレスポンスをパース
+        // レスポンスをパース（SSE形式の文字列またはJSON）
         if (typeof response.data === 'string' && response.data.includes('event:')) {
+          // SSE形式
           const parsed = this.parseSSEMessage(response.data);
           if (parsed && parsed.jsonrpc === '2.0' && parsed.id === id) {
             clearTimeout(timeout);
@@ -252,6 +254,16 @@ class MCPSSEClient {
             } else {
               resolve(parsed.result);
             }
+          }
+        } else if (response.data && response.data.jsonrpc === '2.0') {
+          // JSON形式
+          clearTimeout(timeout);
+          this.pendingRequests.delete(id);
+          
+          if (response.data.error) {
+            reject(new Error(response.data.error.message || JSON.stringify(response.data.error)));
+          } else {
+            resolve(response.data.result);
           }
         }
       }).catch((error) => {
