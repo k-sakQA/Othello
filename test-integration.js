@@ -3,7 +3,7 @@
  * 実際のMCPサーバーと接続してブラウザ操作を確認
  */
 
-const PlaywrightAgent = require('./src/playwright-agent');
+const Othello = require('./src/playwright-agent');
 const ConfigManager = require('./src/config');
 
 // ANSI カラーコード
@@ -29,10 +29,10 @@ async function main() {
     const mcpEndpoint = config.config.playwright_agent?.api_endpoint;
     console.log(`${colors.green}✅ MCPエンドポイント: ${mcpEndpoint}${colors.reset}\n`);
 
-    // PlaywrightAgent初期化
-    console.log(`${colors.blue}🎭 PlaywrightAgent 初期化中...${colors.reset}`);
-    const agent = new PlaywrightAgent(config);
-    console.log(`${colors.green}✅ PlaywrightAgent 初期化完了${colors.reset}\n`);
+    // Othello初期化
+    console.log(`${colors.blue}🎭 Othello 初期化中...${colors.reset}`);
+    const agent = new Othello(config);
+    console.log(`${colors.green}✅ Othello 初期化完了${colors.reset}\n`);
 
     // Test 1: MCP初期化
     console.log(`${colors.bold}${colors.yellow}Test 1: MCP初期化ハンドシェイク${colors.reset}`);

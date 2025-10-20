@@ -1,14 +1,19 @@
 /**
- * Playwright MCPエージェント
- * Playwright MCPサーバーとの連携を管理
- * Stdio通信を使用してPlaywright MCPと通信
+ * Othello - セッション管理・中継レイヤー
+ * 
+ * Playwright AgentsとPlaywright MCPの間を取り持つ中核クラス。
+ * セッション管理、命令構造化、コンテキスト保持を担当します。
+ * 
+ * アーキテクチャ:
+ * 💭 自然言語層 → 🎭 Playwright Agents → ♟️ Othello（このクラス）
+ * → 🧩 MCP層 → 🌐 Playwright層
  */
 
 const fs = require('fs').promises;
 const path = require('path');
 const { MCPStdioClient } = require('./mcp-stdio-client');
 
-class PlaywrightAgent {
+class Othello {
   /**
    * @param {ConfigManager} config - 設定マネージャー
    * @param {Object} options - オプション設定
@@ -448,4 +453,4 @@ class PlaywrightAgent {
   }
 }
 
-module.exports = PlaywrightAgent;
+module.exports = Othello;

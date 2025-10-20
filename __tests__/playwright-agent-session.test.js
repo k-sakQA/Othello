@@ -2,7 +2,10 @@
  * @jest-environment node
  */
 
-const PlaywrightAgent = require('../src/playwright-agent');
+const fs = require('fs').promises;
+const path = require('path');
+
+const Othello = require('../src/playwright-agent');
 const ConfigManager = require('../src/config');
 
 // MCPStdioClientをモック
@@ -27,7 +30,7 @@ jest.mock('../src/mcp-stdio-client', () => {
   };
 });
 
-describe('PlaywrightAgent - MCP Session Management (Stdio)', () => {
+describe('Othello - MCP Session Management (Stdio)', () => {
   let agent;
   let config;
 
@@ -45,7 +48,7 @@ describe('PlaywrightAgent - MCP Session Management (Stdio)', () => {
         }
       }
     };
-    agent = new PlaywrightAgent(mockConfig, { mockMode: false });
+    agent = new Othello(mockConfig, { mockMode: false });
   });
 
   describe('initializeSession (Stdio)', () => {

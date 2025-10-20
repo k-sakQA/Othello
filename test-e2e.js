@@ -8,7 +8,7 @@ const Orchestrator = require('./src/orchestrator');
 const InstructionGenerator = require('./src/instruction-generator');
 const Analyzer = require('./src/analyzer');
 const ResultCollector = require('./src/result-collector');
-const PlaywrightAgent = require('./src/playwright-agent');
+const Othello = require('./src/playwright-agent');
 const path = require('path');
 
 async function runE2ETest() {
@@ -28,11 +28,11 @@ async function runE2ETest() {
     const instructionGenerator = new InstructionGenerator(config);
     const analyzer = new Analyzer(config);
     const resultCollector = new ResultCollector(config);
-    const playwrightAgent = new PlaywrightAgent(config, { mockMode: false }); // 実モード
+    const Othello = new Othello(config, { mockMode: false }); // 実モード
 
     console.log('✅ 全モジュール初期化完了');
-    console.log(`   - Playwright Agent: ${playwrightAgent.mockMode ? 'モックモード' : '実モード'}`);
-    console.log(`   - MCP Endpoint: ${playwrightAgent.mcpEndpoint}\n`);
+    console.log(`   - Playwright Agent: ${Othello.mockMode ? 'モックモード' : '実モード'}`);
+    console.log(`   - MCP Endpoint: ${Othello.mcpEndpoint}\n`);
 
     // Orchestrator初期化
     const orchestrator = new Orchestrator({
@@ -40,7 +40,7 @@ async function runE2ETest() {
       instructionGenerator,
       analyzer,
       resultCollector,
-      playwrightAgent
+      Othello
     });
     console.log('✅ Orchestrator初期化完了\n');
 

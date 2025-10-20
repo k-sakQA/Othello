@@ -1,13 +1,13 @@
 /**
- * PlaywrightAgent Stdio統合テスト
+ * Othello Stdio統合テスト
  * 
- * PlaywrightAgentがStdio通信で正常に動作することを確認
+ * OthelloがStdio通信で正常に動作することを確認
  */
 
-const PlaywrightAgent = require('./src/playwright-agent');
+const Othello = require('./src/playwright-agent');
 
 async function main() {
-  console.log('=== PlaywrightAgent Stdio統合テスト開始 ===\n');
+  console.log('=== Othello Stdio統合テスト開始 ===\n');
 
   // モック設定オブジェクトを作成
   const mockConfig = {
@@ -20,8 +20,8 @@ async function main() {
     }
   };
 
-  // PlaywrightAgentを作成（mockMode = false で実際のMCP通信）
-  const agent = new PlaywrightAgent(mockConfig, { mockMode: false });
+  // Othelloを作成（mockMode = false で実際のMCP通信）
+  const agent = new Othello(mockConfig, { mockMode: false });
 
   try {
     // ステップ 1: セッション初期化
@@ -86,7 +86,7 @@ async function main() {
 
     // 結果サマリー
     console.log('='.repeat(60));
-    console.log('🎉 PlaywrightAgent Stdio統合テスト完了！');
+    console.log('🎉 Othello Stdio統合テスト完了！');
     console.log('='.repeat(60));
     
     const allSuccess = 
@@ -97,7 +97,7 @@ async function main() {
     
     if (allSuccess) {
       console.log('✅ 全テスト成功！');
-      console.log('✅ PlaywrightAgentがStdio通信で正常動作を確認');
+      console.log('✅ OthelloがStdio通信で正常動作を確認');
       console.log('✅ ブラウザインスタンスが保持されていることを確認');
       console.log('✅ 複数の指示を連続実行できることを確認');
     } else {
@@ -118,7 +118,7 @@ async function main() {
 
 // 実行
 main().then(() => {
-  console.log('\n=== PlaywrightAgent Stdio統合テスト終了 ===');
+  console.log('\n=== Othello Stdio統合テスト終了 ===');
   process.exit(0);
 }).catch(error => {
   console.error('\n❌ Fatal error:', error);

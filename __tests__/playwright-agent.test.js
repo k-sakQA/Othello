@@ -17,7 +17,7 @@ describe('PlaywrightAgent', () => {
   });
 
   beforeEach(() => {
-    agent = new PlaywrightAgent(config);
+    agent = new Othello(config);
   });
 
   describe('constructor', () => {
@@ -34,7 +34,7 @@ describe('PlaywrightAgent', () => {
       customConfig.config.default_browser = 'firefox';
       customConfig.config.timeout_seconds = 120;
       
-      const customAgent = new PlaywrightAgent(customConfig);
+      const customAgent = new Othello(customConfig);
       
       expect(customAgent.browser).toBe('firefox');
       expect(customAgent.timeout).toBe(120000);
@@ -42,11 +42,11 @@ describe('PlaywrightAgent', () => {
 
     test('オプションでmockModeを強制的に設定できる', () => {
       // エンドポイントがあってもモックモードにできる
-      const mockAgent = new PlaywrightAgent(config, { mockMode: true });
+      const mockAgent = new Othello(config, { mockMode: true });
       expect(mockAgent.mockMode).toBe(true);
 
       // エンドポイントがなくても実モードにできる
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       expect(realAgent.mockMode).toBe(false);
     });
 
@@ -302,7 +302,7 @@ describe('PlaywrightAgent', () => {
   describe('callMCPServer - MCP通信', () => {
     test('navigate指示をMCPサーバーに送信できる', async () => {
       // モックモードをオフにして実モードでテスト
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       
       // axiosをモック
       const axios = require('axios');
@@ -346,7 +346,7 @@ describe('PlaywrightAgent', () => {
     });
 
     test('click指示をMCPサーバーに送信できる', async () => {
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       
       const axios = require('axios');
       jest.spyOn(axios, 'post').mockResolvedValue({
@@ -389,7 +389,7 @@ describe('PlaywrightAgent', () => {
     });
 
     test('fill指示をMCPサーバーに送信できる', async () => {
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       
       const axios = require('axios');
       jest.spyOn(axios, 'post').mockResolvedValue({
@@ -434,7 +434,7 @@ describe('PlaywrightAgent', () => {
     });
 
     test('screenshot指示をMCPサーバーに送信できる', async () => {
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       
       const axios = require('axios');
       jest.spyOn(axios, 'post').mockResolvedValue({
@@ -474,7 +474,7 @@ describe('PlaywrightAgent', () => {
     });
 
     test('MCPサーバーエラーを正しくハンドリングできる', async () => {
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       
       const axios = require('axios');
       jest.spyOn(axios, 'post').mockRejectedValue(new Error('Connection refused'));
@@ -492,7 +492,7 @@ describe('PlaywrightAgent', () => {
     });
 
     test('MCPサーバータイムアウトを処理できる', async () => {
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       
       const axios = require('axios');
       jest.spyOn(axios, 'post').mockRejectedValue({
@@ -513,7 +513,7 @@ describe('PlaywrightAgent', () => {
     });
 
     test('MCPサーバーから不正なレスポンスを受け取った場合', async () => {
-      const realAgent = new PlaywrightAgent(config, { mockMode: false });
+      const realAgent = new Othello(config, { mockMode: false });
       
       const axios = require('axios');
       jest.spyOn(axios, 'post').mockResolvedValue({
