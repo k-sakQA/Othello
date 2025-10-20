@@ -1,10 +1,12 @@
 /**
  * Playwright MCPエージェント
  * Playwright MCPサーバーとの連携を管理
+ * Stdio通信を使用してPlaywright MCPと通信
  */
 
 const fs = require('fs').promises;
 const path = require('path');
+const { MCPStdioClient } = require('./mcp-stdio-client');
 
 class PlaywrightAgent {
   /**
@@ -17,17 +19,14 @@ class PlaywrightAgent {
     this.browser = config.config.default_browser || 'chromium';
     this.timeout = (config.config.timeout_seconds || 300) * 1000; // ミリ秒に変換
     
-    // Playwright MCPエンドポイント
-    this.mcpEndpoint = config.config.playwright_agent?.api_endpoint || null;
+    // モックモード（オプションで上書き可能、設定で判定）
+    this.mockMode = options.mockMode !== undefined ? options.mockMode : 
+                    (config.config.playwright_agent?.mock_mode !== false);
     
-    // モックモード（オプションで上書き可能、デフォルトはエンドポイントの有無で判定）
-    this.mockMode = options.mockMode !== undefined ? options.mockMode : !this.mcpEndpoint;
-    
-    // セッション管理
-    this.sessionId = null;
+    // Stdio通信用のMCPクライアント
+    this.mcpClient = null;
     this.isSessionInitialized = false;
     this.browserLaunched = false;
-    this.mcpRequestId = 0; // JSON-RPC 2.0のリクエストID
   }
 
   /**
@@ -121,7 +120,7 @@ class PlaywrightAgent {
   }
 
   /**
-   * MCPセッションを初期化
+   * MCPセッションを初期化（Stdio通信）
    * @returns {Promise<void>}
    */
   async initializeSession() {
@@ -129,63 +128,27 @@ class PlaywrightAgent {
     if (this.isSessionInitialized) {
       return;
     }
-
-    let axios;
-    try {
-      axios = require('axios');
-    } catch (error) {
-      throw new Error(`Failed to load axios: ${error.message}`);
-    }
-    
-    const crypto = require('crypto');
     
     try {
-      // セッションIDを生成
-      this.sessionId = crypto.randomUUID();
+      // MCPStdioClientを作成
+      this.mcpClient = new MCPStdioClient({
+        clientName: 'Othello',
+        clientVersion: '2.0.0',
+        serverArgs: [
+          // ブラウザタイプを指定（必要に応じて）
+          // '--browser', this.browser
+        ]
+      });
+
+      // Stdio通信で接続（initializeは自動実行される）
+      await this.mcpClient.connect();
       
-      // MCP初期化リクエスト (JSON-RPC 2.0準拠)
-      const initRequest = {
-        jsonrpc: '2.0',
-        id: ++this.mcpRequestId,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: {
-            name: 'Othello',
-            version: '1.0.0'
-          }
-        }
-      };
-
-      // 初期化リクエスト送信
-      const response = await axios.post(
-        this.mcpEndpoint,
-        initRequest,
-        {
-          timeout: this.timeout,
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream'
-          }
-        }
-      );
-
-      // SSE形式レスポンスをパース
-      const parsedResponse = this.parseSSEResponse(response.data);
-      
-      if (!parsedResponse || parsedResponse.error) {
-        throw new Error(
-          parsedResponse?.error?.message || 'Failed to initialize MCP session'
-        );
-      }
-
       // セッション初期化完了（ブラウザは最初のツール呼び出し時に自動起動される）
       this.isSessionInitialized = true;
-      this.browserLaunched = false; // ブラウザはまだ起動していない
+      this.browserLaunched = false;
       
     } catch (error) {
-      this.sessionId = null;
+      this.mcpClient = null;
       this.isSessionInitialized = false;
       
       throw new Error(`MCP session initialization failed: ${error.message}`);
@@ -203,7 +166,7 @@ class PlaywrightAgent {
   }
 
   /**
-   * セッションをクローズ
+   * セッションをクローズ（Stdio通信）
    * @returns {Promise<void>}
    */
   async closeSession() {
@@ -212,72 +175,30 @@ class PlaywrightAgent {
     }
 
     try {
-      // ブラウザクローズはMCPサーバー側で管理されるため、
-      // ここでは状態のリセットのみ
+      // MCPクライアントを切断
+      if (this.mcpClient) {
+        await this.mcpClient.disconnect();
+        this.mcpClient = null;
+      }
+      
+      // 状態をリセット
       this.browserLaunched = false;
       this.isSessionInitialized = false;
-      this.sessionId = null;
-      this.mcpRequestId = 0;
       
     } catch (error) {
       console.error(`Session close error: ${error.message}`);
     }
   }
 
-  /**
-   * SSE (Server-Sent Events) 形式のレスポンスをパース
-   * @param {string|Object} data - SSE形式のデータまたはJSONオブジェクト
-   * @returns {Object|null} パース済みのJSONオブジェクト、または失敗時はnull
-   */
-  parseSSEResponse(data) {
-    try {
-      // すでにオブジェクトの場合はそのまま返す
-      if (typeof data === 'object' && data !== null) {
-        return data;
-      }
 
-      // 文字列の場合はSSE形式としてパース
-      if (typeof data !== 'string') {
-        return null;
-      }
-
-      // 空文字列チェック
-      if (!data.trim()) {
-        return null;
-      }
-
-      // SSE形式: "event: message\ndata: {...}\n\n"
-      const lines = data.split('\n');
-      let lastDataLine = null;
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          lastDataLine = line.substring(6); // "data: "を除去
-        }
-      }
-
-      if (!lastDataLine) {
-        return null;
-      }
-
-      // JSONパース
-      return JSON.parse(lastDataLine);
-      
-    } catch (error) {
-      console.error('SSE parse error:', error.message);
-      return null;
-    }
-  }
 
   /**
-   * MCP サーバーを呼び出し
+   * MCP サーバーを呼び出し（Stdio通信）
    * @param {Object} instruction - テスト指示
    * @param {number} startTime - 開始時刻
    * @returns {Promise<Object>} 実行結果
    */
   async callMCPServer(instruction, startTime) {
-    const axios = require('axios');
-    
     try {
       // セッションが初期化されていない場合は自動初期化
       if (!this.isSessionInitialized) {
@@ -299,46 +220,27 @@ class PlaywrightAgent {
         throw new Error(`Unsupported instruction type: ${instruction.type}`);
       }
 
-      // MCPリクエストパラメータを構築 (JSON-RPC 2.0準拠)
-      const mcpRequest = {
-        jsonrpc: '2.0',
-        id: ++this.mcpRequestId,
-        method: 'tools/call',
-        params: {
-          name: toolName,
-          arguments: this.buildMCPArguments(instruction)
-        }
-      };
+      // MCP引数を構築
+      const mcpArguments = this.buildMCPArguments(instruction);
 
-      // MCPサーバーにリクエスト送信
-      const response = await axios.post(
-        this.mcpEndpoint,
-        mcpRequest,
-        {
-          timeout: this.timeout,
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream'
-          }
-        }
-      );
+      // MCPStdioClientでツールを呼び出し
+      const mcpResult = await this.mcpClient.callTool(toolName, mcpArguments);
 
-      // SSE形式レスポンスをパース
-      const parsedData = this.parseSSEResponse(response.data);
-      
-      if (!parsedData) {
-        throw new Error('Failed to parse SSE response');
+      // 成功時のレスポンス処理
+      if (mcpResult.success) {
+        return {
+          success: true,
+          instruction: instruction.description || instruction.type,
+          type: instruction.type,
+          details: mcpResult.sections ? Object.fromEntries(mcpResult.sections) : {},
+          content: mcpResult.content,
+          timestamp: new Date().toISOString(),
+          duration_ms: Date.now() - startTime
+        };
+      } else {
+        // エラーレスポンス
+        throw new Error(mcpResult.error || 'MCP tool call failed');
       }
-
-      // JSON-RPC 2.0エラーチェック
-      if (parsedData.error) {
-        throw new Error(
-          parsedData.error.message || JSON.stringify(parsedData.error)
-        );
-      }
-
-      // レスポンスを解析
-      return this.parseMCPResponse(parsedData, instruction, startTime);
 
     } catch (error) {
       // エラーハンドリング
@@ -405,71 +307,7 @@ class PlaywrightAgent {
     }
   }
 
-  /**
-   * MCPレスポンスを解析
-   * @param {Object} data - MCPレスポンスデータ
-   * @param {Object} instruction - テスト指示
-   * @param {number} startTime - 開始時刻
-   * @returns {Object} 実行結果
-   */
-  parseMCPResponse(data, instruction, startTime) {
-    // JSON-RPC 2.0レスポンス構造をチェック
-    if (!data || typeof data !== 'object') {
-      return {
-        success: false,
-        instruction: instruction.description || instruction.type,
-        error: 'Invalid response from MCP server: not an object',
-        timestamp: new Date().toISOString(),
-        duration_ms: Date.now() - startTime,
-        status: 'error'
-      };
-    }
 
-    // resultフィールドからコンテンツを取得
-    const mcpResult = data.result || {};
-    const mcpContent = mcpResult.content || [];
-
-    // コンテンツが空の場合
-    if (mcpContent.length === 0) {
-      return {
-        success: false,
-        instruction: instruction.description || instruction.type,
-        error: 'Invalid response from MCP server: empty content',
-        timestamp: new Date().toISOString(),
-        duration_ms: Date.now() - startTime,
-        status: 'error'
-      };
-    }
-
-    // コンテンツから結果を抽出
-    const firstContent = mcpContent[0];
-    let parsedResult;
-
-    if (firstContent.type === 'text') {
-      try {
-        parsedResult = JSON.parse(firstContent.text);
-      } catch (e) {
-        parsedResult = { success: true, data: firstContent.text };
-      }
-    } else if (firstContent.type === 'image') {
-      parsedResult = {
-        success: true,
-        image: firstContent.data,
-        mimeType: firstContent.mimeType
-      };
-    } else {
-      parsedResult = { success: true, data: firstContent };
-    }
-
-    // 統一形式に変換
-    return {
-      success: parsedResult.success !== false,
-      instruction: instruction.description || instruction.type,
-      details: parsedResult,
-      timestamp: new Date().toISOString(),
-      duration_ms: Date.now() - startTime
-    };
-  }
 
   /**
    * 完全なテストを実行
