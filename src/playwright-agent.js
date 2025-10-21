@@ -236,6 +236,83 @@ class Othello {
   }
 
   /**
+   * 実行履歴をファイルに保存
+   * @param {string} filename - 保存先ファイルパス
+   * @returns {Promise<void>}
+   */
+  async saveExecutionHistory(filename) {
+    try {
+      const historyData = {
+        sessionId: this.sessionId,
+        savedAt: new Date().toISOString(),
+        totalEntries: this.executionHistory.length,
+        history: this.executionHistory
+      };
+
+      await fs.writeFile(filename, JSON.stringify(historyData, null, 2), 'utf-8');
+      
+      if (this.debugMode) {
+        console.log(`[DEBUG] Execution history saved to: ${filename}`);
+        console.log(`[DEBUG] Total entries: ${this.executionHistory.length}`);
+      }
+      
+      await this.logExecution('info', 'saveExecutionHistory', {
+        filename,
+        entriesCount: this.executionHistory.length
+      });
+    } catch (error) {
+      await this.logExecution('error', 'saveExecutionHistory', {
+        filename,
+        error: error.message,
+        ...(this.debugMode && { stackTrace: error.stack })
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * ファイルから実行履歴を読み込み
+   * @param {string} filename - 読み込み元ファイルパス
+   * @param {boolean} append - 既存の履歴に追加するか（デフォルト: false）
+   * @returns {Promise<Object>} 読み込んだ履歴データ
+   */
+  async loadExecutionHistory(filename, append = false) {
+    try {
+      const fileContent = await fs.readFile(filename, 'utf-8');
+      const historyData = JSON.parse(fileContent);
+
+      if (!append) {
+        this.executionHistory = historyData.history;
+      } else {
+        this.executionHistory.push(...historyData.history);
+      }
+
+      if (this.debugMode) {
+        console.log(`[DEBUG] Execution history loaded from: ${filename}`);
+        console.log(`[DEBUG] Loaded entries: ${historyData.totalEntries}`);
+        console.log(`[DEBUG] Original session ID: ${historyData.sessionId}`);
+        console.log(`[DEBUG] Saved at: ${historyData.savedAt}`);
+      }
+
+      await this.logExecution('info', 'loadExecutionHistory', {
+        filename,
+        entriesLoaded: historyData.totalEntries,
+        originalSessionId: historyData.sessionId,
+        append
+      });
+
+      return historyData;
+    } catch (error) {
+      await this.logExecution('error', 'loadExecutionHistory', {
+        filename,
+        error: error.message,
+        ...(this.debugMode && { stackTrace: error.stack })
+      });
+      throw error;
+    }
+  }
+
+  /**
    * MCPセッションを初期化（Stdio通信）
    * @returns {Promise<void>}
    */
