@@ -94,7 +94,8 @@ describe('Othello - 永続化機能', () => {
     });
 
     test('保存時にエラーが発生した場合、エラーをthrowする', async () => {
-      const invalidPath = '/invalid/path/history.json';
+      // 書き込み権限のないパス（Windowsでは'CON:'などの予約デバイス名）
+      const invalidPath = 'CON:/invalid/history.json';
 
       await expect(othello.saveExecutionHistory(invalidPath))
         .rejects

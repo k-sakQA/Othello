@@ -1,0 +1,28 @@
+{
+  "default_browser": "chromium",
+  "timeout_seconds": 30,
+  "max_iterations": 5,
+  "mcp_server": {
+    "command": "node",
+    "args": ["test-server.js"],
+    "timeout_seconds": 60,
+    "connection_type": "stdio"
+  },
+  "playwright_agent": {
+    "browser": "chromium",
+    "headless": true,
+    "timeout_seconds": 30,
+    "screenshot_on_failure": true
+  },
+  "paths": {
+    "test_instructions": "./tests",
+    "logs": "./logs",
+    "screenshots": "./screenshots",
+    "results": "./results",
+    "reports": "./reports"
+  },
+  "coverage": {
+    "minimum_threshold": 80,
+    "report_format": "json"
+  }
+}
