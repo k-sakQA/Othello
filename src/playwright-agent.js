@@ -40,6 +40,15 @@ class Othello {
     this.debugMode = options.debugMode || false;
     this.executionHistory = [];
     this.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // エラーリカバリー設定
+    this.maxRetries = options.maxRetries || 0;
+    this.retryDelay = options.retryDelay || 1000; // 初期遅延: 1秒
+    this.backoffMultiplier = options.backoffMultiplier || 2; // 2倍ずつ増加
+    this.maxRetryDelay = options.maxRetryDelay || 30000; // 最大30秒
+    this.autoReconnect = options.autoReconnect !== undefined ? options.autoReconnect : true;
+    this.saveSnapshotOnFailure = options.saveSnapshotOnFailure || false;
+    this.snapshotDir = options.snapshotDir || './error-snapshots';
   }
 
   /**
@@ -74,6 +83,11 @@ class Othello {
       if (this.mockMode) {
         const result = this.simulateInstruction(instruction, startTime);
         
+        // モックモードでも失敗時はスナップショットを保存
+        if (!result.success) {
+          await this.saveFailureSnapshot(instruction, new Error(result.error));
+        }
+        
         await this.logExecution('info', 'executeInstruction', {
           mode: 'mock',
           instruction: instruction.type,
@@ -99,6 +113,9 @@ class Othello {
       return result;
 
     } catch (error) {
+      // 失敗時のスナップショットを保存
+      await this.saveFailureSnapshot(instruction, error);
+      
       const result = {
         success: false,
         instruction: instruction.description || instruction.type,
@@ -113,8 +130,44 @@ class Othello {
         stack: error.stack
       });
       
+      // セッション切断エラーの場合、自動再接続を試みる
+      if (this.autoReconnect && this.isSessionDisconnected(error)) {
+        await this.logExecution('warn', 'executeInstruction', {
+          message: 'Session disconnected, attempting to reconnect...'
+        });
+        
+        try {
+          await this.initializeSession();
+          await this.logExecution('info', 'executeInstruction', {
+            message: 'Session reconnected successfully'
+          });
+        } catch (reconnectError) {
+          await this.logExecution('error', 'executeInstruction', {
+            message: 'Failed to reconnect session',
+            error: reconnectError.message
+          });
+        }
+      }
+      
       return result;
     }
+  }
+
+  /**
+   * セッション切断エラーかどうかを判定
+   * @param {Error} error - エラーオブジェクト
+   * @returns {boolean}
+   */
+  isSessionDisconnected(error) {
+    const disconnectPatterns = [
+      /session.*closed/i,
+      /session.*disconnected/i,
+      /connection.*closed/i,
+      /websocket.*closed/i,
+      /mcp.*disconnected/i
+    ];
+    
+    return disconnectPatterns.some(pattern => pattern.test(error.message));
   }
 
   /**
@@ -665,6 +718,126 @@ class Othello {
 
     // TODO: 実際のブラウザ終了処理
     throw new Error('Browser close not yet implemented');
+  }
+
+  /**
+   * 指数バックオフ付き自動再試行
+   * @param {Function} action - 実行する非同期関数
+   * @param {string} actionName - アクション名（ログ用）
+   * @returns {Promise<any>} アクションの結果
+   */
+  async executeWithRetry(action, actionName = 'unknown') {
+    let lastError;
+    let attempts = 0;
+    const startTime = Date.now();
+
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      attempts = attempt + 1;
+
+      try {
+        // アクション実行
+        const result = await action();
+
+        // 成功時のログ
+        await this.logExecution('info', 'executeWithRetry', {
+          action: actionName,
+          attempts: attempts,
+          maxRetries: this.maxRetries,
+          success: true,
+          duration_ms: Date.now() - startTime
+        });
+
+        return result;
+
+      } catch (error) {
+        lastError = error;
+
+        // 最後の試行の場合はリトライしない
+        if (attempt === this.maxRetries) {
+          break;
+        }
+
+        // 指数バックオフ計算
+        const delay = Math.min(
+          this.retryDelay * Math.pow(this.backoffMultiplier, attempt),
+          this.maxRetryDelay
+        );
+
+        // リトライログ
+        await this.logExecution('warn', 'executeWithRetry', {
+          action: actionName,
+          attempt: attempts,
+          maxRetries: this.maxRetries,
+          error: error.message,
+          retryIn: delay,
+          nextAttempt: attempt + 2
+        });
+
+        // 待機
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    // 全ての試行が失敗
+    await this.logExecution('error', 'executeWithRetry', {
+      action: actionName,
+      attempts,
+      maxRetries: this.maxRetries,
+      success: false,
+      error: lastError.message,
+      duration_ms: Date.now() - startTime,
+      ...(this.debugMode && { stackTrace: lastError.stack })
+    });
+
+    throw lastError;
+  }
+
+  /**
+   * 失敗時のスナップショットを保存
+   * @param {Object} instruction - 失敗した指示
+   * @param {Error} error - 発生したエラー
+   * @returns {Promise<void>}
+   */
+  async saveFailureSnapshot(instruction, error) {
+    if (!this.saveSnapshotOnFailure) {
+      return;
+    }
+
+    try {
+      const fs = require('fs').promises;
+      const path = require('path');
+
+      // ディレクトリ作成
+      await fs.mkdir(this.snapshotDir, { recursive: true });
+
+      // スナップショットデータ
+      const snapshot = {
+        timestamp: new Date().toISOString(),
+        sessionId: this.sessionId,
+        instruction,
+        error: {
+          message: error.message,
+          stack: error.stack
+        },
+        executionHistory: this.executionHistory.slice(-5) // 直近5件
+      };
+
+      // ファイル名生成
+      const filename = `failure_${Date.now()}_${this.sessionId.split('_')[2]}.json`;
+      const filepath = path.join(this.snapshotDir, filename);
+
+      // 保存
+      await fs.writeFile(filepath, JSON.stringify(snapshot, null, 2), 'utf-8');
+
+      await this.logExecution('info', 'saveFailureSnapshot', {
+        filename,
+        filepath
+      });
+
+    } catch (snapshotError) {
+      // スナップショット保存のエラーはログのみ
+      console.error(`Failed to save failure snapshot: ${snapshotError.message}`);
+    }
   }
 }
 
