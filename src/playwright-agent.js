@@ -191,6 +191,11 @@ class Othello {
     // ログファイルが指定されている場合はファイルに追記
     if (this.logFile) {
       try {
+        // ディレクトリが存在しない場合は作成
+        const path = require('path');
+        const logDir = path.dirname(this.logFile);
+        await fs.mkdir(logDir, { recursive: true });
+        
         await fs.appendFile(this.logFile, JSON.stringify(logEntry) + '\n', 'utf-8');
       } catch (error) {
         console.error(`Failed to write log to file: ${error.message}`);
