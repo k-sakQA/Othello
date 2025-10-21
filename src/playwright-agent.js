@@ -17,7 +17,9 @@ class Othello {
   /**
    * @param {ConfigManager} config - 設定マネージャー
    * @param {Object} options - オプション設定
-   * @param {boolean} options.mockMode - モックモードを強制（デフォルト: エンドポイントの有無で自動判定）
+   * @param {boolean} options.mockMode - モックモードを強制
+   * @param {string} options.logFile - ログファイルパス（任意）
+   * @param {boolean} options.debugMode - デバッグモード（デフォルト: false）
    */
   constructor(config, options = {}) {
     this.config = config;
@@ -32,6 +34,12 @@ class Othello {
     this.mcpClient = null;
     this.isSessionInitialized = false;
     this.browserLaunched = false;
+    
+    // ログ機能設定
+    this.logFile = options.logFile || null;
+    this.debugMode = options.debugMode || false;
+    this.executionHistory = [];
+    this.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
@@ -46,31 +54,66 @@ class Othello {
       // 指示タイプの検証
       const validTypes = ['navigate', 'click', 'fill', 'screenshot', 'evaluate', 'wait'];
       if (!validTypes.includes(instruction.type)) {
-        return {
+        const result = {
           success: false,
           instruction: instruction.description || instruction.type,
           error: `サポートされていない指示タイプ: ${instruction.type}`,
           timestamp: new Date().toISOString(),
           duration_ms: Date.now() - startTime
         };
+        
+        await this.logExecution('warn', 'executeInstruction', {
+          instruction: instruction.type,
+          result
+        });
+        
+        return result;
       }
 
       // モックモードの場合はシミュレーション
       if (this.mockMode) {
-        return this.simulateInstruction(instruction, startTime);
+        const result = this.simulateInstruction(instruction, startTime);
+        
+        await this.logExecution('info', 'executeInstruction', {
+          mode: 'mock',
+          instruction: instruction.type,
+          result
+        });
+        
+        return result;
       }
 
-      // 実際のMCPサーバー呼び出し（将来の実装）
-      return await this.callMCPServer(instruction, startTime);
+      // 実際のMCPサーバー呼び出し
+      const result = await this.callMCPServer(instruction, startTime);
+      
+      await this.logExecution(
+        result.success ? 'info' : 'error',
+        'executeInstruction',
+        {
+          mode: 'real',
+          instruction: instruction.type,
+          result
+        }
+      );
+      
+      return result;
 
     } catch (error) {
-      return {
+      const result = {
         success: false,
         instruction: instruction.description || instruction.type,
         error: error.message,
         timestamp: new Date().toISOString(),
         duration_ms: Date.now() - startTime
       };
+      
+      await this.logExecution('error', 'executeInstruction', {
+        instruction: instruction.type,
+        error: error.message,
+        stack: error.stack
+      });
+      
+      return result;
     }
   }
 
@@ -125,6 +168,74 @@ class Othello {
   }
 
   /**
+   * 実行ログを記録
+   * @param {string} level - ログレベル（info, warn, error）
+   * @param {string} action - アクション名
+   * @param {Object} data - ログデータ
+   * @returns {Promise<void>}
+   */
+  async logExecution(level, action, data) {
+    const logEntry = {
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      level,
+      action,
+      data,
+      // デバッグモード時はスタックトレースを含める
+      ...(this.debugMode && level === 'error' && { stackTrace: new Error().stack })
+    };
+
+    // メモリ内履歴に追加
+    this.executionHistory.push(logEntry);
+
+    // ログファイルが指定されている場合はファイルに追記
+    if (this.logFile) {
+      try {
+        await fs.appendFile(this.logFile, JSON.stringify(logEntry) + '\n', 'utf-8');
+      } catch (error) {
+        console.error(`Failed to write log to file: ${error.message}`);
+      }
+    }
+
+    // デバッグモード時はコンソールにも出力
+    if (this.debugMode) {
+      const prefix = `[${level.toUpperCase()}] [${action}]`;
+      console.log(`${prefix}:`, JSON.stringify(data, null, 2));
+    }
+  }
+
+  /**
+   * 実行履歴を取得
+   * @param {Object} filter - フィルター条件（level, action等）
+   * @returns {Array} フィルターされた実行履歴
+   */
+  getExecutionHistory(filter = {}) {
+    let history = [...this.executionHistory];
+
+    if (filter.level) {
+      history = history.filter(entry => entry.level === filter.level);
+    }
+
+    if (filter.action) {
+      history = history.filter(entry => entry.action === filter.action);
+    }
+
+    if (filter.since) {
+      const sinceTime = new Date(filter.since).getTime();
+      history = history.filter(entry => new Date(entry.timestamp).getTime() >= sinceTime);
+    }
+
+    return history;
+  }
+
+  /**
+   * 実行履歴をクリア
+   */
+  clearExecutionHistory() {
+    this.executionHistory = [];
+  }
+
+  /**
    * MCPセッションを初期化（Stdio通信）
    * @returns {Promise<void>}
    */
@@ -152,9 +263,22 @@ class Othello {
       this.isSessionInitialized = true;
       this.browserLaunched = false;
       
+      // ログ記録
+      await this.logExecution('info', 'initializeSession', {
+        sessionId: this.sessionId,
+        browser: this.browser,
+        mockMode: this.mockMode
+      });
+      
     } catch (error) {
       this.mcpClient = null;
       this.isSessionInitialized = false;
+      
+      // エラーログ記録
+      await this.logExecution('error', 'initializeSession', {
+        error: error.message,
+        stack: error.stack
+      });
       
       throw new Error(`MCP session initialization failed: ${error.message}`);
     }
@@ -190,7 +314,16 @@ class Othello {
       this.browserLaunched = false;
       this.isSessionInitialized = false;
       
+      // ログ記録
+      await this.logExecution('info', 'closeSession', {
+        sessionId: this.sessionId,
+        totalActions: this.executionHistory.length
+      });
+      
     } catch (error) {
+      await this.logExecution('error', 'closeSession', {
+        error: error.message
+      });
       console.error(`Session close error: ${error.message}`);
     }
   }
