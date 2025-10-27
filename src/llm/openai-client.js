@@ -18,7 +18,7 @@ class OpenAIClient {
    */
   constructor(config = {}) {
     this.apiKey = config.apiKey || process.env.OPENAI_API_KEY;
-    this.model = config.model || 'gpt-4';
+    this.model = config.model || 'gpt-4o'; // GPT-4o (2024-11-20) / gpt-4o-mini
     this.maxTokens = config.maxTokens || 4000;
     this.temperature = config.temperature || 0.7;
     this.baseUrl = 'https://api.openai.com/v1/chat/completions';

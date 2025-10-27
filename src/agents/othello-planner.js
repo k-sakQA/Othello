@@ -17,13 +17,27 @@ class OthelloPlanner {
     const csvContent = await fs.readFile(csvPath, 'utf-8');
     const rows = parseCSV(csvContent);
     
-    return rows.map((row, index) => ({
-      aspect_no: parseInt(row['No'], 10) || index + 1,
-      quality_characteristic: row['品質特性'] || '',
-      test_type_major: row['テストタイプ中分類'] || '',
-      test_type_minor: row['テストタイプ小分類'] || '',
-      test_aspect: row['テスト観点'] || ''
-    }));
+    const aspects = rows.map((row, index) => {
+      // ヘッダーの様々なバリエーションに対応
+      const noValue = row['No,'] || row['No'] || row['no'] || row['NO'];
+      const qualityValue = Object.keys(row).find(k => k.includes('品質特性'));
+      const majorValue = Object.keys(row).find(k => k.includes('テストタイプ中分類'));
+      const minorValue = Object.keys(row).find(k => k.includes('テストタイプ小分類'));
+      const aspectValue = Object.keys(row).find(k => k.includes('テスト観点'));
+      
+      return {
+        aspect_no: parseInt(noValue, 10) || index + 1,
+        quality_characteristic: qualityValue ? row[qualityValue] : '',
+        test_type_major: majorValue ? row[majorValue] : '',
+        test_type_minor: minorValue ? row[minorValue] : '',
+        test_aspect: aspectValue ? row[aspectValue] : ''
+      };
+    }).filter(aspect => 
+      // 空のエントリを除外（テストタイプまたは観点があるもののみ）
+      aspect.test_type_major || aspect.test_aspect
+    );
+    
+    return aspects;
   }
 
   prioritizeAspects(aspects, existingCoverage) {
@@ -64,8 +78,7 @@ class OthelloPlanner {
   }
 
   buildAnalysisPrompt({ url, aspects, existingCoverage, iteration }) {
-    const aspectsList = aspects.map(a => `No.${a.aspect_no}: ${a.test_type_major}${a.test_type_minor ? ' - ' + a.test_type_minor : ''}
-観点: ${a.test_aspect}`).join('\n\n');
+    const aspectsList = aspects.map(a => `No.${a.aspect_no}: ${a.test_type_major}${a.test_type_minor ? ' - ' + a.test_type_minor : ''}\n観点: ${a.test_aspect}`).join('\n\n');
     
     return `あなたはテスト分析の専門家です。
 
