@@ -39,7 +39,7 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.0",
+    "@playwright/test": "^1.56.1",
     "jest": "^29.7.0"
   }
 }
