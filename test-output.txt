@@ -1,0 +1,55 @@
+FAIL __tests__/error-recovery.test.js (9.231 s)
+  Othello - 繧ｨ繝ｩ繝ｼ繝ｪ繧ｫ繝舌Μ繝ｼ讖溯・・・DD・・    閾ｪ蜍募・隧ｦ陦梧ｩ溯・
+      竏・maxRetries繧ｪ繝励す繝ｧ繝ｳ縺ｧ繝ｪ繝医Λ繧､蝗樊焚繧定ｨｭ螳壹〒縺阪ｋ (2 ms)
+      竏・maxRetries縺ｮ繝・ヵ繧ｩ繝ｫ繝亥､縺ｯ0・医Μ繝医Λ繧､縺ｪ縺暦ｼ・(1 ms)
+      竏・荳譎ら噪縺ｪ繧ｨ繝ｩ繝ｼ縺檎匱逕溘＠縺溷ｴ蜷医∵欠螳壼屓謨ｰ縺ｾ縺ｧ閾ｪ蜍募・隧ｦ陦後☆繧・(3029 ms)
+      竏・譛螟ｧ繝ｪ繝医Λ繧､蝗樊焚繧定ｶ・∴縺溘ｉ繧ｨ繝ｩ繝ｼ繧稚hrow縺吶ｋ (3050 ms)
+      ﾃ・繝ｪ繝医Λ繧､蝗樊焚繧貞ｮ溯｡悟ｱ･豁ｴ縺ｫ險倬鹸縺吶ｋ (1010 ms)
+    謖・焚繝舌ャ繧ｯ繧ｪ繝・      竏・繝ｪ繝医Λ繧､譎ゅ↓蠕・ｩ滓凾髢薙′謖・焚逧・↓蠅怜刈縺吶ｋ (306 ms)
+      竏・譛螟ｧ蠕・ｩ滓凾髢難ｼ・axRetryDelay・峨ｒ雜・∴縺ｪ縺・(1231 ms)
+    繧ｻ繝・す繝ｧ繝ｳ蜀肴磁邯・      竏・autoReconnect繧ｪ繝励す繝ｧ繝ｳ縺瑚ｨｭ螳壹〒縺阪ｋ (1 ms)
+      竏・autoReconnect縺ｮ繝・ヵ繧ｩ繝ｫ繝亥､縺ｯtrue (1 ms)
+      竏・繧ｻ繝・す繝ｧ繝ｳ蛻・妙繧ｨ繝ｩ繝ｼ繧貞愛螳壹〒縺阪ｋ (1 ms)
+    螟ｱ謨玲凾縺ｮ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ閾ｪ蜍穂ｿ晏ｭ・      ﾃ・螟ｱ謨玲凾縺ｫ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ繧定・蜍穂ｿ晏ｭ倥☆繧・(3 ms)
+      竏・謌仙粥譎ゅ・繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ繧剃ｿ晏ｭ倥＠縺ｪ縺・(1 ms)
+      竏・繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ菫晏ｭ俶凾縺ｫ繧ｨ繝ｩ繝ｼ縺檎匱逕溘＠縺ｦ繧ょ・縺ｮ繧ｨ繝ｩ繝ｼ繧堤ｶｭ謖√☆繧・(6 ms)
+    邨ｱ蜷医ユ繧ｹ繝・ 繧ｨ繝ｩ繝ｼ繝ｪ繧ｫ繝舌Μ繝ｼ蜈ｨ菴・      竏・繝ｪ繝医Λ繧､ + 繝舌ャ繧ｯ繧ｪ繝・+ 繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ菫晏ｭ倥・騾｣謳ｺ (171 ms)
+
+  笳・Othello - 繧ｨ繝ｩ繝ｼ繝ｪ繧ｫ繝舌Μ繝ｼ讖溯・・・DD・・窶ｺ 閾ｪ蜍募・隧ｦ陦梧ｩ溯・ 窶ｺ 繝ｪ繝医Λ繧､蝗樊焚繧貞ｮ溯｡悟ｱ･豁ｴ縺ｫ險倬鹸縺吶ｋ
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: undefined
+
+      115 |       // 繝・・繧ｿ縺ｯlogExecution縺ｮ隨ｬ3蠑墓焚縺ｨ縺励※貂｡縺輔ｌ繧・[39m
+      116 |       expect(retryLog.data).toBeDefined();
+    > 117 |       expect(retryLog.data.attempts).toBe(2);
+          |                                      ^
+      118 |       expect(retryLog.data.maxRetries).toBe(3);
+      119 |     });
+      120 |   });
+
+      at Object.toBe (__tests__/error-recovery.test.js:117:38)
+
+  笳・Othello - 繧ｨ繝ｩ繝ｼ繝ｪ繧ｫ繝舌Μ繝ｼ讖溯・・・DD・・窶ｺ 螟ｱ謨玲凾縺ｮ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ閾ｪ蜍穂ｿ晏ｭ・窶ｺ 螟ｱ謨玲凾縺ｫ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ繧定・蜍穂ｿ晏ｭ倥☆繧・
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      257 |         .catch(() => false);
+      258 |       
+    > 259 |       expect(dirExists).toBe(true);
+          |                         ^
+      260 |       
+      261 |       const files = await fs.readdir(snapshotDir);
+      262 |       const snapshotFiles = files.filter(f => f.endsWith('.json'));
+
+      at Object.toBe (__tests__/error-recovery.test.js:259:25)
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 12 passed, 14 total
+Snapshots:   0 total
+Time:        9.298 s, estimated 10 s
+Ran all test suites matching /__tests__\\error-recovery.test.js/i.

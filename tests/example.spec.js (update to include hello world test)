@@ -1,0 +1,5 @@
+test('hello world test', async ({ page }) => {
+    await page.goto('http://localhost:3000'); // Adjust the URL as needed
+    const helloWorldText = await page.textContent('body'); // Adjust the selector as needed
+    expect(helloWorldText).toContain('Hello World');
+});

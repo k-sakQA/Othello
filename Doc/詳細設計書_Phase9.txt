@@ -1,0 +1,1401 @@
+# Othello - Playwright E2Eテスト自動化ツール 詳細設計書（Phase 9版）
+
+**システム名**: Othello  
+**バージョン**: 2.0  
+**作成日**: 2025年10月23日  
+**対象フェーズ**: Phase 9（完全自動化版）
+
+---
+
+## 1. システム構成
+
+### 1.1 ディレクトリ構造
+```
+Othello/
+├── bin/
+│   └── othello.js                    # CLIエントリーポイント
+├── src/
+│   ├── orchestrator.js               # イテレーションループ管理
+│   ├── agents/
+│   │   ├── othello-planner.js        # テスト分析・計画生成
+│   │   ├── othello-generator.js      # テストスクリプト生成
+│   │   └── othello-healer.js         # 失敗テスト自動修復
+│   ├── analyzer.js                   # カバレッジ分析
+│   ├── collector.js                  # カバレッジデータ収集
+│   ├── reporter.js                   # レポート生成
+│   ├── playwright-agent.js           # MCP通信（Phase 8完成）
+│   ├── llm/
+│   │   ├── claude-client.js          # Claude API クライアント
+│   │   ├── openai-client.js          # OpenAI API クライアント
+│   │   └── llm-factory.js            # LLMプロバイダ選択
+│   └── utils/
+│       ├── csv-parser.js             # CSV解析ユーティリティ
+│       ├── json-validator.js         # JSON検証ユーティリティ
+│       └── logger.js                 # ログユーティリティ
+├── config/
+│   ├── default.json                  # デフォルト設定
+│   └── test-ViewpointList.csv        # テスト観点リスト（23項目）
+├── logs/
+│   ├── execution-history-*.json      # 実行履歴
+│   └── snapshots/                    # 失敗時スナップショット
+├── reports/
+│   ├── test-plan-iteration-*.md      # テスト計画書
+│   ├── test-analysis.json            # テスト分析結果
+│   ├── coverage-report.json          # カバレッジレポート
+│   ├── final-report.html             # 最終HTMLレポート
+│   └── bug-reports/                  # バグレポート
+├── __tests__/
+│   ├── agents/
+│   │   ├── othello-planner.test.js
+│   │   ├── othello-generator.test.js
+│   │   └── othello-healer.test.js
+│   ├── orchestrator.test.js
+│   ├── analyzer.test.js
+│   └── integration/
+│       └── full-cycle.test.js        # E2E統合テスト
+└── docs/
+    ├── api-reference.md              # API仕様書
+    └── examples/
+        ├── hotel-site-test-plan.md   # サンプルテスト計画
+        └── custom-ViewpointList.csv  # カスタム観点例
+```
+
+---
+
+## 2. コンポーネント詳細設計
+
+### 2.1 bin/othello.js（CLIエントリーポイント）
+
+#### 2.1.1 責務
+- コマンドライン引数の解析
+- 設定ファイルの読み込み
+- Orchestratorの起動
+
+#### 2.1.2 インターフェース
+```javascript
+#!/usr/bin/env node
+
+const Orchestrator = require('../src/orchestrator');
+const { parseArgs } = require('../src/utils/cli-parser');
+const { loadConfig } = require('../src/utils/config-loader');
+
+async function main() {
+  // コマンドライン引数解析
+  const args = parseArgs(process.argv);
+  
+  // 設定ファイル読み込み
+  const config = await loadConfig(args.config || './config/default.json');
+  
+  // 引数で設定を上書き
+  const mergedConfig = {
+    ...config,
+    url: args.url,
+    maxIterations: args.maxIterations || config.maxIterations,
+    coverageTarget: args.coverageTarget || config.coverageTarget,
+    browser: args.browser || config.browser,
+    outputDir: args.output || config.outputDir,
+    testAspectsCSV: args.testAspectsCSV || config.testAspectsCSV,
+    autoHeal: args.autoHeal !== undefined ? args.autoHeal : config.autoHeal,
+    llmProvider: args.llmProvider || config.llmProvider
+  };
+  
+  // Orchestrator起動
+  const orchestrator = new Orchestrator(mergedConfig);
+  await orchestrator.run();
+}
+
+main().catch(error => {
+  console.error('Fatal error:', error);
+  process.exit(1);
+});
+```
+
+#### 2.1.3 引数解析（parseArgs）
+```javascript
+function parseArgs(argv) {
+  const args = {};
+  for (let i = 2; i < argv.length; i++) {
+    if (argv[i] === '--url') {
+      args.url = argv[++i];
+    } else if (argv[i] === '--max-iterations') {
+      args.maxIterations = parseInt(argv[++i], 10);
+    } else if (argv[i] === '--coverage-target') {
+      args.coverageTarget = parseInt(argv[++i], 10);
+    } else if (argv[i] === '--browser') {
+      args.browser = argv[++i];
+    } else if (argv[i] === '--output') {
+      args.output = argv[++i];
+    } else if (argv[i] === '--config') {
+      args.config = argv[++i];
+    } else if (argv[i] === '--test-aspects-csv') {
+      args.testAspectsCSV = argv[++i];
+    } else if (argv[i] === '--auto-heal') {
+      args.autoHeal = true;
+    } else if (argv[i] === '--no-auto-heal') {
+      args.autoHeal = false;
+    } else if (argv[i] === '--llm-provider') {
+      args.llmProvider = argv[++i];
+    }
+  }
+  return args;
+}
+```
+
+---
+
+### 2.2 src/orchestrator.js（イテレーションループ管理）
+
+#### 2.2.1 クラス定義
+```javascript
+const OthelloPlanner = require('./agents/othello-planner');
+const OthelloGenerator = require('./agents/othello-generator');
+const OthelloHealer = require('./agents/othello-healer');
+const PlaywrightAgent = require('./playwright-agent');
+const Analyzer = require('./analyzer');
+const Reporter = require('./reporter');
+const { LLMFactory } = require('./llm/llm-factory');
+
+class Orchestrator {
+  constructor(config) {
+    this.config = config;
+    this.iteration = 0;
+    this.coverageHistory = [];
+    this.testResults = [];
+    
+    // コンポーネント初期化
+    this.llm = LLMFactory.create(config.llmProvider, config.llmConfig);
+    this.planner = new OthelloPlanner({ llm: this.llm, config });
+    this.generator = new OthelloGenerator({ llm: this.llm, config });
+    this.healer = new OthelloHealer({ llm: this.llm, config });
+    this.agent = new PlaywrightAgent(config.mcpConfig);
+    this.analyzer = new Analyzer(config);
+    this.reporter = new Reporter(config);
+  }
+
+  async run() {
+    console.log('🎭 Othello starting...');
+    console.log(`Target URL: ${this.config.url}`);
+    console.log(`Coverage target: ${this.config.coverageTarget}%`);
+    
+    try {
+      // MCPセッション開始
+      await this.agent.connect();
+      
+      // イテレーションループ
+      while (this.shouldContinue()) {
+        this.iteration++;
+        console.log(`\n📊 Iteration ${this.iteration}/${this.config.maxIterations}`);
+        
+        await this.runIteration();
+        
+        // カバレッジ判定
+        const coverage = this.getCurrentCoverage();
+        console.log(`Current coverage: ${coverage.aspectCoverage.percentage}%`);
+        
+        if (coverage.aspectCoverage.percentage >= this.config.coverageTarget) {
+          console.log('✅ Coverage target reached!');
+          break;
+        }
+        
+        // 停滞判定
+        if (this.isStagnant()) {
+          console.log('⚠️  Coverage stagnant, stopping...');
+          break;
+        }
+      }
+      
+      // 最終レポート生成
+      await this.generateFinalReport();
+      
+      console.log('🎉 Othello completed successfully!');
+    } catch (error) {
+      console.error('❌ Othello failed:', error);
+      throw error;
+    } finally {
+      await this.agent.disconnect();
+    }
+  }
+
+  async runIteration() {
+    // Step 1: Othello-Planner - テスト分析・計画生成
+    console.log('  1️⃣  Planner: Analyzing and generating test plan...');
+    const testPlan = await this.planner.generateTestPlan({
+      url: this.config.url,
+      testAspectsCSV: this.config.testAspectsCSV,
+      existingCoverage: this.getCurrentCoverage(),
+      iteration: this.iteration
+    });
+    
+    // Step 2: Othello-Generator - テストスクリプト生成
+    console.log('  2️⃣  Generator: Generating test scripts...');
+    const snapshot = await this.agent.getSnapshot();
+    const testScripts = await this.generator.generate({
+      testCases: testPlan.testCases,
+      snapshot,
+      existingCoverage: this.getCurrentCoverage()
+    });
+    
+    // Step 3: Playwright MCP - テスト実行
+    console.log('  3️⃣  Agent: Executing tests...');
+    const executionResults = await this.executeTests(testScripts);
+    
+    // Step 4: LLM AI - 結果分析
+    console.log('  4️⃣  LLM: Analyzing results...');
+    const analysis = await this.analyzeResults(executionResults, testPlan);
+    
+    // Step 5: Othello-Healer - 失敗テスト修復
+    if (this.config.autoHeal) {
+      console.log('  5️⃣  Healer: Healing failed tests...');
+      await this.healFailedTests(executionResults, analysis);
+    }
+    
+    // Step 6: Analyzer - カバレッジ算出
+    console.log('  6️⃣  Analyzer: Calculating coverage...');
+    const coverage = await this.analyzer.analyze({
+      testPlan,
+      executionResults,
+      analysis,
+      testAspectsCSV: this.config.testAspectsCSV
+    });
+    
+    this.coverageHistory.push(coverage);
+    
+    // イテレーションレポート保存
+    await this.reporter.saveIterationReport({
+      iteration: this.iteration,
+      testPlan,
+      executionResults,
+      analysis,
+      coverage
+    });
+  }
+
+  async executeTests(testScripts) {
+    const results = [];
+    
+    for (const script of testScripts) {
+      console.log(`    Testing: ${script.test_case_id}`);
+      
+      try {
+        const result = await this.agent.executeInstructions(script.instructions);
+        results.push({
+          test_case_id: script.test_case_id,
+          aspect_no: script.aspect_no,
+          status: 'success',
+          result
+        });
+      } catch (error) {
+        const snapshot = await this.agent.getSnapshot().catch(() => null);
+        results.push({
+          test_case_id: script.test_case_id,
+          aspect_no: script.aspect_no,
+          status: 'failed',
+          error: error.message,
+          snapshot
+        });
+      }
+    }
+    
+    return results;
+  }
+
+  async analyzeResults(executionResults, testPlan) {
+    const analyses = [];
+    
+    for (const result of executionResults) {
+      if (result.status === 'failed') {
+        const testCase = testPlan.testCases.find(tc => tc.case_id === result.test_case_id);
+        
+        const analysis = await this.llm.analyze({
+          testCase,
+          result,
+          snapshot: result.snapshot
+        });
+        
+        analyses.push({
+          test_case_id: result.test_case_id,
+          ...analysis
+        });
+      }
+    }
+    
+    return analyses;
+  }
+
+  async healFailedTests(executionResults, analyses) {
+    for (const analysis of analyses) {
+      if (!analysis.is_bug) {
+        const result = executionResults.find(r => r.test_case_id === analysis.test_case_id);
+        
+        console.log(`    Healing: ${analysis.test_case_id}`);
+        const healed = await this.healer.heal({
+          testCaseId: analysis.test_case_id,
+          error: result.error,
+          snapshot: result.snapshot,
+          failureReason: analysis.failure_reason
+        });
+        
+        if (healed.success) {
+          console.log(`    ✅ Healed successfully`);
+          // 修復したスクリプトで再実行
+          try {
+            const retryResult = await this.agent.executeInstructions(healed.instructions);
+            result.status = 'healed';
+            result.healedResult = retryResult;
+          } catch (error) {
+            console.log(`    ❌ Retry failed: ${error.message}`);
+          }
+        }
+      } else {
+        console.log(`    🐛 Bug detected: ${analysis.test_case_id}`);
+        await this.reporter.saveBugReport({
+          test_case_id: analysis.test_case_id,
+          bug_type: analysis.bug_type,
+          description: analysis.failure_reason,
+          recommendation: analysis.recommendation
+        });
+      }
+    }
+  }
+
+  shouldContinue() {
+    return this.iteration < this.config.maxIterations;
+  }
+
+  getCurrentCoverage() {
+    if (this.coverageHistory.length === 0) {
+      return {
+        aspectCoverage: { total: 23, tested: 0, percentage: 0, untested_aspects: [] },
+        functionCoverage: { total: 0, tested: 0, percentage: 0, untested_functions: [] }
+      };
+    }
+    return this.coverageHistory[this.coverageHistory.length - 1];
+  }
+
+  isStagnant() {
+    if (this.coverageHistory.length < 3) return false;
+    
+    const recent = this.coverageHistory.slice(-3);
+    const percentages = recent.map(c => c.aspectCoverage.percentage);
+    
+    // 3回連続で変化なし
+    return percentages[0] === percentages[1] && percentages[1] === percentages[2];
+  }
+
+  async generateFinalReport() {
+    await this.reporter.generateFinalReport({
+      config: this.config,
+      iterations: this.iteration,
+      coverageHistory: this.coverageHistory,
+      testResults: this.testResults
+    });
+  }
+}
+
+module.exports = Orchestrator;
+```
+
+---
+
+### 2.3 src/agents/othello-planner.js（テスト分析・計画生成）
+
+#### 2.3.1 主要メソッド
+
+```javascript
+class OthelloPlanner {
+  constructor({ llm, config }) {
+    this.llm = llm;
+    this.config = config;
+  }
+
+  async generateTestPlan(options) {
+    const { url, testAspectsCSV, existingCoverage, iteration } = options;
+    
+    // 1. テスト観点リストを読み込み
+    const aspects = await this.loadTestAspects(testAspectsCSV);
+    
+    // 2. サイト構造を取得（Snapshotは外部から取得）
+    // （このメソッド内ではSnapshotを受け取る想定）
+    
+    // 3. 未テストの観点を優先
+    const priorityAspects = this.prioritizeAspects(aspects, existingCoverage);
+    
+    // 4. LLMでテスト分析
+    const analysis = await this.analyzeWithLLM({
+      url,
+      aspects: priorityAspects,
+      existingCoverage,
+      iteration
+    });
+    
+    // 5. テストケース生成
+    const testCases = this.extractTestCases(analysis);
+    
+    // 6. Markdown形式でも保存
+    const markdown = this.formatAsMarkdown(analysis);
+    
+    return {
+      iteration,
+      aspects: priorityAspects,
+      analysis,
+      testCases,
+      markdown
+    };
+  }
+
+  async loadTestAspects(csvPath) {
+    const fs = require('fs').promises;
+    const { parseCSV } = require('../utils/csv-parser');
+    
+    const csvContent = await fs.readFile(csvPath, 'utf-8');
+    const aspects = parseCSV(csvContent);
+    
+    return aspects.map((row, index) => ({
+      aspect_no: parseInt(row['No'], 10) || index + 1,
+      quality_characteristic: row['品質特性'] || '',
+      test_type_major: row['テストタイプ中分類'] || '',
+      test_type_minor: row['テストタイプ小分類'] || '',
+      test_aspect: row['テスト観点'] || '',
+      target_function_template: row['対象の機能構造'] || '',
+      specification_template: row['考慮すべき仕様の具体例'] || '',
+      target_bug_template: row['狙うバグ'] || ''
+    }));
+  }
+
+  prioritizeAspects(aspects, existingCoverage) {
+    const tested = existingCoverage.aspectCoverage?.tested || [];
+    const untested = aspects.filter(a => !tested.includes(a.aspect_no));
+    
+    // 未テストを優先、次にP0/P1を優先
+    return [
+      ...untested.filter(a => a.priority === 'P0'),
+      ...untested.filter(a => a.priority === 'P1'),
+      ...untested.filter(a => !['P0', 'P1'].includes(a.priority)),
+      ...aspects.filter(a => tested.includes(a.aspect_no))
+    ].slice(0, 10); // 一度に10観点まで
+  }
+
+  async analyzeWithLLM(options) {
+    const { url, aspects, existingCoverage, iteration } = options;
+    
+    const prompt = this.buildAnalysisPrompt({ url, aspects, existingCoverage, iteration });
+    
+    const response = await this.llm.chat({
+      messages: [
+        { role: 'system', content: 'あなたはテスト分析の専門家です。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      maxTokens: 4000
+    });
+    
+    return this.parseAnalysisResponse(response.content);
+  }
+
+  buildAnalysisPrompt({ url, aspects, existingCoverage, iteration }) {
+    return `
+あなたはテスト分析の専門家です。
+
+【対象URL】
+${url}
+
+【イテレーション】
+${iteration}回目
+
+【既存カバレッジ】
+${JSON.stringify(existingCoverage, null, 2)}
+
+【テスト観点リスト】（優先度順）
+${aspects.map(a => `
+No.${a.aspect_no}: ${a.test_type_major} - ${a.test_type_minor}
+観点: ${a.test_aspect}
+`).join('\n')}
+
+【タスク】
+各テスト観点について、以下を分析してください：
+
+1. **対象の機能構造**: このシステムのどの画面・機能・要素が該当するか
+2. **考慮すべき仕様の具体例**: このシステム固有の具体的な仕様（5個程度）
+3. **狙うバグ**: この観点で見つけるべきバグの種類（3個程度）
+4. **テストケース**: 具体的なテスト手順と期待結果（2-3ケース）
+
+【出力形式】
+JSON配列で出力してください：
+
+\`\`\`json
+[
+  {
+    "aspect_no": 1,
+    "test_type": "表示（UI）",
+    "test_category": "レイアウト/文言",
+    "target_function": "...",
+    "specifications": ["...", "..."],
+    "target_bugs": ["...", "..."],
+    "priority": "P0",
+    "test_cases": [
+      {
+        "case_id": "TC001",
+        "title": "...",
+        "steps": ["...", "..."],
+        "expected_results": ["...", "..."]
+      }
+    ]
+  }
+]
+\`\`\`
+`;
+  }
+
+  parseAnalysisResponse(content) {
+    // JSONブロックを抽出
+    const jsonMatch = content.match(/```json\n([\s\S]+?)\n```/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[1]);
+    }
+    
+    // JSON直接の場合
+    try {
+      return JSON.parse(content);
+    } catch (error) {
+      console.error('Failed to parse LLM response:', content);
+      throw new Error('Invalid LLM response format');
+    }
+  }
+
+  extractTestCases(analysis) {
+    const testCases = [];
+    
+    for (const aspect of analysis) {
+      for (const testCase of aspect.test_cases || []) {
+        testCases.push({
+          ...testCase,
+          aspect_no: aspect.aspect_no,
+          test_type: aspect.test_type,
+          priority: aspect.priority || 'P2'
+        });
+      }
+    }
+    
+    return testCases;
+  }
+
+  formatAsMarkdown(analysis) {
+    let md = '# テスト分析結果\n\n';
+    
+    for (const aspect of analysis) {
+      md += `## No.${aspect.aspect_no}: ${aspect.test_type} - ${aspect.test_category}\n\n`;
+      md += `**対象の機能構造**: ${aspect.target_function}\n\n`;
+      md += `**考慮すべき仕様**:\n`;
+      for (const spec of aspect.specifications || []) {
+        md += `- ${spec}\n`;
+      }
+      md += `\n**狙うバグ**:\n`;
+      for (const bug of aspect.target_bugs || []) {
+        md += `- ${bug}\n`;
+      }
+      md += `\n**テストケース**:\n`;
+      for (const tc of aspect.test_cases || []) {
+        md += `\n### ${tc.case_id}: ${tc.title}\n\n`;
+        md += `**手順**:\n`;
+        for (let i = 0; i < tc.steps.length; i++) {
+          md += `${i + 1}. ${tc.steps[i]}\n`;
+        }
+        md += `\n**期待結果**:\n`;
+        for (let i = 0; i < tc.expected_results.length; i++) {
+          md += `${i + 1}. ${tc.expected_results[i]}\n`;
+        }
+      }
+      md += '\n---\n\n';
+    }
+    
+    return md;
+  }
+}
+
+module.exports = OthelloPlanner;
+```
+
+---
+
+### 2.4 src/agents/othello-generator.js（テストスクリプト生成）
+
+#### 2.4.1 クラス定義
+```javascript
+class OthelloGenerator {
+  constructor({ llm, config }) {
+    this.llm = llm;
+    this.config = config;
+  }
+
+  async generate(options) {
+    const { testCases, snapshot, existingCoverage } = options;
+    
+    const scripts = [];
+    
+    for (const testCase of testCases) {
+      console.log(`    Generating script for: ${testCase.case_id}`);
+      
+      const script = await this.generateScript({
+        testCase,
+        snapshot,
+        existingCoverage
+      });
+      
+      scripts.push(script);
+    }
+    
+    return scripts;
+  }
+
+  async generateScript({ testCase, snapshot }) {
+    const prompt = this.buildGeneratorPrompt({ testCase, snapshot });
+    
+    const response = await this.llm.chat({
+      messages: [
+        { role: 'system', content: 'あなたはテストスクリプト生成の専門家です。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3,
+      maxTokens: 2000
+    });
+    
+    const instructions = this.parseInstructions(response.content);
+    
+    return {
+      test_case_id: testCase.case_id,
+      aspect_no: testCase.aspect_no,
+      instructions
+    };
+  }
+
+  buildGeneratorPrompt({ testCase, snapshot }) {
+    return `
+あなたはテストスクリプト生成の専門家です。
+
+【テストケース】
+ID: ${testCase.case_id}
+タイトル: ${testCase.title}
+
+手順:
+${testCase.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+期待結果:
+${testCase.expected_results.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+【ページSnapshot】
+${snapshot}
+
+【タスク】
+このテストケースを実行するためのPlaywright MCP命令を生成してください。
+
+【セレクタ戦略】（優先順位）
+1. MCPの\`ref\`（Snapshot内の"e123"のような参照）
+2. data-testid属性
+3. アクセシブルな名前（role + name）
+4. セマンティックセレクタ
+5. CSSセレクタ
+
+【出力形式】
+JSON配列で出力してください：
+
+\`\`\`json
+[
+  {
+    "type": "navigate",
+    "url": "...",
+    "description": "..."
+  },
+  {
+    "type": "fill",
+    "ref": "e48",
+    "selector": "input[name='username']",
+    "value": "...",
+    "description": "..."
+  },
+  {
+    "type": "click",
+    "ref": "e59",
+    "selector": "button[type='submit']",
+    "description": "..."
+  },
+  {
+    "type": "verify",
+    "ref": "e72",
+    "selector": ".success-message",
+    "expected": "...",
+    "description": "..."
+  }
+]
+\`\`\`
+
+【重要】
+- \`ref\`は必ずSnapshot内の実際の値を使用
+- 待機が必要な場合は"wait"命令を追加
+- エラーメッセージの検証には"verify_text_visible"を使用
+`;
+  }
+
+  parseInstructions(content) {
+    const jsonMatch = content.match(/```json\n([\s\S]+?)\n```/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[1]);
+    }
+    
+    try {
+      return JSON.parse(content);
+    } catch (error) {
+      console.error('Failed to parse instructions:', content);
+      throw new Error('Invalid instructions format');
+    }
+  }
+}
+
+module.exports = OthelloGenerator;
+```
+
+---
+
+### 2.5 src/agents/othello-healer.js（失敗テスト自動修復）
+
+#### 2.5.1 クラス定義
+```javascript
+class OthelloHealer {
+  constructor({ llm, config }) {
+    this.llm = llm;
+    this.config = config;
+    this.healingHistory = [];
+  }
+
+  async heal(options) {
+    const { testCaseId, error, snapshot, failureReason } = options;
+    
+    // 失敗パターンを分類
+    const category = this.categorizeFailure(error, failureReason);
+    
+    console.log(`      Failure category: ${category}`);
+    
+    // カテゴリに応じた修復策を生成
+    const fix = await this.generateFix({
+      testCaseId,
+      category,
+      error,
+      snapshot,
+      failureReason
+    });
+    
+    // 履歴記録
+    this.healingHistory.push({
+      testCaseId,
+      category,
+      fix,
+      timestamp: new Date().toISOString()
+    });
+    
+    return fix;
+  }
+
+  categorizeFailure(error, failureReason) {
+    const errorLower = error.toLowerCase();
+    
+    if (errorLower.includes('element not found') || errorLower.includes('selector')) {
+      return 'ELEMENT_NOT_FOUND';
+    } else if (errorLower.includes('timeout')) {
+      return 'TIMEOUT';
+    } else if (errorLower.includes('hidden') || errorLower.includes('not visible')) {
+      return 'ELEMENT_HIDDEN';
+    } else if (errorLower.includes('invalid value') || errorLower.includes('validation')) {
+      return 'INVALID_VALUE';
+    } else {
+      return 'UNKNOWN';
+    }
+  }
+
+  async generateFix({ testCaseId, category, error, snapshot, failureReason }) {
+    const strategy = this.getHealingStrategy(category);
+    
+    if (strategy.type === 'llm') {
+      return await this.healWithLLM({ testCaseId, category, error, snapshot, failureReason });
+    } else {
+      return this.healWithRule({ testCaseId, category, error, strategy });
+    }
+  }
+
+  getHealingStrategy(category) {
+    const strategies = {
+      'ELEMENT_NOT_FOUND': { type: 'llm', description: 'Find alternative selector' },
+      'TIMEOUT': { type: 'rule', action: 'increase_timeout', multiplier: 2 },
+      'ELEMENT_HIDDEN': { type: 'rule', action: 'scroll_and_wait' },
+      'INVALID_VALUE': { type: 'llm', description: 'Generate valid value' },
+      'UNKNOWN': { type: 'llm', description: 'Analyze and suggest fix' }
+    };
+    
+    return strategies[category] || strategies['UNKNOWN'];
+  }
+
+  async healWithLLM({ testCaseId, category, error, snapshot, failureReason }) {
+    const prompt = `
+あなたはテストスクリプト修復の専門家です。
+
+【失敗したテスト】
+Test Case ID: ${testCaseId}
+Category: ${category}
+Error: ${error}
+Failure Reason: ${failureReason}
+
+【現在のSnapshot】
+${snapshot}
+
+【タスク】
+このテストを修復するための新しい命令を生成してください。
+
+【出力形式】
+\`\`\`json
+{
+  "success": true,
+  "instructions": [
+    {
+      "type": "...",
+      "ref": "...",
+      "selector": "...",
+      "value": "...",
+      "description": "..."
+    }
+  ],
+  "explanation": "修復の理由"
+}
+\`\`\`
+`;
+
+    const response = await this.llm.chat({
+      messages: [
+        { role: 'system', content: 'あなたはテスト修復の専門家です。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3,
+      maxTokens: 1500
+    });
+    
+    return this.parseFix(response.content);
+  }
+
+  healWithRule({ testCaseId, category, error, strategy }) {
+    if (strategy.action === 'increase_timeout') {
+      return {
+        success: true,
+        instructions: [
+          {
+            type: 'wait',
+            duration: 5000,
+            description: 'Increase wait time'
+          }
+        ],
+        explanation: `Timeout increased by ${strategy.multiplier}x`
+      };
+    } else if (strategy.action === 'scroll_and_wait') {
+      return {
+        success: true,
+        instructions: [
+          {
+            type: 'evaluate',
+            function: 'window.scrollTo(0, document.body.scrollHeight)',
+            description: 'Scroll to bottom'
+          },
+          {
+            type: 'wait',
+            duration: 2000,
+            description: 'Wait for element to appear'
+          }
+        ],
+        explanation: 'Scroll and wait for element'
+      };
+    }
+    
+    return {
+      success: false,
+      explanation: 'No rule-based fix available'
+    };
+  }
+
+  parseFix(content) {
+    const jsonMatch = content.match(/```json\n([\s\S]+?)\n```/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[1]);
+    }
+    
+    try {
+      return JSON.parse(content);
+    } catch (error) {
+      return {
+        success: false,
+        explanation: 'Failed to parse fix'
+      };
+    }
+  }
+}
+
+module.exports = OthelloHealer;
+```
+
+---
+
+### 2.6 src/analyzer.js（カバレッジ分析）
+
+#### 2.6.1 クラス定義
+```javascript
+class Analyzer {
+  constructor(config) {
+    this.config = config;
+  }
+
+  async analyze(options) {
+    const { testPlan, executionResults, analysis, testAspectsCSV } = options;
+    
+    // テスト観点リストを読み込み
+    const allAspects = await this.loadAspects(testAspectsCSV);
+    
+    // 観点カバレッジ算出
+    const aspectCoverage = this.calculateAspectCoverage(testPlan, executionResults, allAspects);
+    
+    // 機能カバレッジ算出
+    const functionCoverage = this.calculateFunctionCoverage(testPlan, executionResults);
+    
+    // 画面カバレッジ算出
+    const screenCoverage = this.calculateScreenCoverage(testPlan, executionResults);
+    
+    // 次のターゲット提案
+    const nextTargets = this.suggestNextTargets(aspectCoverage, functionCoverage);
+    
+    return {
+      aspectCoverage,
+      functionCoverage,
+      screenCoverage,
+      nextTargets
+    };
+  }
+
+  async loadAspects(csvPath) {
+    const fs = require('fs').promises;
+    const { parseCSV } = require('./utils/csv-parser');
+    
+    const csvContent = await fs.readFile(csvPath, 'utf-8');
+    return parseCSV(csvContent);
+  }
+
+  calculateAspectCoverage(testPlan, executionResults, allAspects) {
+    const testedAspects = new Set();
+    
+    // 成功したテストの観点を収集
+    for (const result of executionResults) {
+      if (result.status === 'success' || result.status === 'healed') {
+        testedAspects.add(result.aspect_no);
+      }
+    }
+    
+    const total = allAspects.length;
+    const tested = testedAspects.size;
+    const percentage = (tested / total) * 100;
+    
+    const untestedAspects = allAspects
+      .filter(a => !testedAspects.has(parseInt(a['No'], 10)))
+      .map(a => parseInt(a['No'], 10));
+    
+    return {
+      total,
+      tested,
+      percentage: Math.round(percentage * 10) / 10,
+      untested_aspects: untestedAspects,
+      tested_aspects: Array.from(testedAspects)
+    };
+  }
+
+  calculateFunctionCoverage(testPlan, executionResults) {
+    const allFunctions = new Set();
+    const testedFunctions = new Set();
+    
+    // テスト計画から全機能を収集
+    for (const aspect of testPlan.analysis || []) {
+      if (aspect.target_function) {
+        allFunctions.add(aspect.target_function);
+      }
+    }
+    
+    // 成功したテストの機能を収集
+    for (const result of executionResults) {
+      if (result.status === 'success' || result.status === 'healed') {
+        const aspect = (testPlan.analysis || []).find(a => a.aspect_no === result.aspect_no);
+        if (aspect && aspect.target_function) {
+          testedFunctions.add(aspect.target_function);
+        }
+      }
+    }
+    
+    const total = allFunctions.size;
+    const tested = testedFunctions.size;
+    const percentage = total > 0 ? (tested / total) * 100 : 0;
+    
+    return {
+      total,
+      tested,
+      percentage: Math.round(percentage * 10) / 10,
+      untested_functions: Array.from(allFunctions).filter(f => !testedFunctions.has(f)),
+      tested_functions: Array.from(testedFunctions)
+    };
+  }
+
+  calculateScreenCoverage(testPlan, executionResults) {
+    // 簡易実装: URL遷移を追跡
+    const visitedUrls = new Set();
+    
+    for (const result of executionResults) {
+      if (result.result && result.result.url) {
+        visitedUrls.add(result.result.url);
+      }
+    }
+    
+    return {
+      visited_screens: Array.from(visitedUrls),
+      count: visitedUrls.size
+    };
+  }
+
+  suggestNextTargets(aspectCoverage, functionCoverage) {
+    return {
+      priority_aspects: aspectCoverage.untested_aspects.slice(0, 5),
+      priority_functions: functionCoverage.untested_functions.slice(0, 3),
+      recommendation: this.generateRecommendation(aspectCoverage, functionCoverage)
+    };
+  }
+
+  generateRecommendation(aspectCoverage, functionCoverage) {
+    if (aspectCoverage.percentage < 50) {
+      return '基本的なテスト観点を優先的にカバーしてください';
+    } else if (aspectCoverage.percentage < 80) {
+      return '未カバーの重要機能に焦点を当ててください';
+    } else {
+      return 'エッジケースや組み合わせテストを実施してください';
+    }
+  }
+}
+
+module.exports = Analyzer;
+```
+
+---
+
+### 2.7 src/reporter.js（レポート生成）
+
+#### 2.7.1 クラス定義
+```javascript
+const fs = require('fs').promises;
+const path = require('path');
+
+class Reporter {
+  constructor(config) {
+    this.config = config;
+    this.outputDir = config.outputDir || './reports';
+  }
+
+  async saveIterationReport(data) {
+    const { iteration, testPlan, executionResults, analysis, coverage } = data;
+    
+    // Markdown形式で保存
+    const markdown = this.generateIterationMarkdown(data);
+    const mdPath = path.join(this.outputDir, `test-plan-iteration-${iteration}.md`);
+    await fs.mkdir(this.outputDir, { recursive: true });
+    await fs.writeFile(mdPath, markdown, 'utf-8');
+    
+    // JSON形式でも保存
+    const jsonPath = path.join(this.outputDir, `iteration-${iteration}.json`);
+    await fs.writeFile(jsonPath, JSON.stringify(data, null, 2), 'utf-8');
+    
+    console.log(`  📄 Iteration report saved: ${mdPath}`);
+  }
+
+  generateIterationMarkdown(data) {
+    const { iteration, testPlan, executionResults, coverage } = data;
+    
+    let md = `# Iteration ${iteration} - Test Report\n\n`;
+    md += `## Coverage Summary\n\n`;
+    md += `- **Aspect Coverage**: ${coverage.aspectCoverage.percentage}% (${coverage.aspectCoverage.tested}/${coverage.aspectCoverage.total})\n`;
+    md += `- **Function Coverage**: ${coverage.functionCoverage.percentage}% (${coverage.functionCoverage.tested}/${coverage.functionCoverage.total})\n\n`;
+    
+    md += `## Test Results\n\n`;
+    const successCount = executionResults.filter(r => r.status === 'success' || r.status === 'healed').length;
+    md += `- **Total**: ${executionResults.length}\n`;
+    md += `- **Success**: ${successCount}\n`;
+    md += `- **Failed**: ${executionResults.length - successCount}\n\n`;
+    
+    md += `## Test Plan\n\n`;
+    md += testPlan.markdown || '';
+    
+    return md;
+  }
+
+  async saveBugReport(bugData) {
+    const { test_case_id, bug_type, description, recommendation } = bugData;
+    
+    const bugDir = path.join(this.outputDir, 'bug-reports');
+    await fs.mkdir(bugDir, { recursive: true });
+    
+    const bugReport = `# Bug Report: ${test_case_id}\n\n`;
+    const bugPath = path.join(bugDir, `${test_case_id}-${Date.now()}.md`);
+    
+    await fs.writeFile(bugPath, bugReport + `
+## Bug Type
+${bug_type}
+
+## Description
+${description}
+
+## Recommendation
+${recommendation}
+
+## Timestamp
+${new Date().toISOString()}
+`, 'utf-8');
+    
+    console.log(`  🐛 Bug report saved: ${bugPath}`);
+  }
+
+  async generateFinalReport(data) {
+    const { config, iterations, coverageHistory } = data;
+    
+    // HTML形式で生成
+    const html = this.generateFinalHTML(data);
+    const htmlPath = path.join(this.outputDir, 'final-report.html');
+    await fs.writeFile(htmlPath, html, 'utf-8');
+    
+    // JSON形式でも保存
+    const summary = {
+      url: config.url,
+      iterations,
+      final_coverage: coverageHistory[coverageHistory.length - 1],
+      coverage_history: coverageHistory,
+      timestamp: new Date().toISOString()
+    };
+    
+    const jsonPath = path.join(this.outputDir, 'coverage-report.json');
+    await fs.writeFile(jsonPath, JSON.stringify(summary, null, 2), 'utf-8');
+    
+    console.log(`\n📊 Final report: ${htmlPath}`);
+  }
+
+  generateFinalHTML(data) {
+    const { config, iterations, coverageHistory } = data;
+    const finalCoverage = coverageHistory[coverageHistory.length - 1];
+    
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <title>Othello Test Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .summary { background: #f0f0f0; padding: 20px; border-radius: 5px; }
+    .chart { margin: 20px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #4CAF50; color: white; }
+  </style>
+</head>
+<body>
+  <h1>🎭 Othello Test Report</h1>
+  
+  <div class="summary">
+    <h2>Summary</h2>
+    <p><strong>Target URL:</strong> ${config.url}</p>
+    <p><strong>Iterations:</strong> ${iterations}</p>
+    <p><strong>Final Aspect Coverage:</strong> ${finalCoverage.aspectCoverage.percentage}%</p>
+    <p><strong>Final Function Coverage:</strong> ${finalCoverage.functionCoverage.percentage}%</p>
+  </div>
+  
+  <h2>Coverage Progress</h2>
+  <table>
+    <tr>
+      <th>Iteration</th>
+      <th>Aspect Coverage (%)</th>
+      <th>Function Coverage (%)</th>
+    </tr>
+    ${coverageHistory.map((c, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${c.aspectCoverage.percentage}</td>
+      <td>${c.functionCoverage.percentage}</td>
+    </tr>
+    `).join('')}
+  </table>
+  
+  <p><em>Generated by Othello v2.0 on ${new Date().toISOString()}</em></p>
+</body>
+</html>`;
+  }
+}
+
+module.exports = Reporter;
+```
+
+---
+
+## 3. データ構造
+
+### 3.1 テスト観点リストCSV形式
+```csv
+No,品質特性,テストタイプ中分類,テストタイプ小分類,テスト観点
+1,-,表示（UI）,レイアウト/文言,アイテムの配置/表示サイズは？
+2,-,表示（UI）,エラー表示（正常系）,エラーメッセージはある？
+...
+```
+
+### 3.2 テスト分析結果JSON
+```json
+{
+  "aspect_no": 1,
+  "test_type": "表示（UI）",
+  "test_category": "レイアウト/文言",
+  "target_function": "ホテルプラン一覧ページ",
+  "specifications": ["...", "..."],
+  "target_bugs": ["...", "..."],
+  "priority": "P0",
+  "test_cases": [
+    {
+      "case_id": "TC001",
+      "title": "...",
+      "steps": ["...", "..."],
+      "expected_results": ["...", "..."]
+    }
+  ]
+}
+```
+
+### 3.3 MCP命令JSON
+```json
+{
+  "test_case_id": "TC001",
+  "aspect_no": 1,
+  "instructions": [
+    {
+      "type": "navigate",
+      "url": "...",
+      "description": "..."
+    },
+    {
+      "type": "fill",
+      "ref": "e48",
+      "selector": "...",
+      "value": "...",
+      "description": "..."
+    }
+  ]
+}
+```
+
+---
+
+## 4. API仕様
+
+### 4.1 LLM API（Claude）
+```javascript
+// Anthropic Claude API
+const response = await axios.post('https://api.anthropic.com/v1/messages', {
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 4000,
+  messages: [
+    { role: 'user', content: prompt }
+  ]
+}, {
+  headers: {
+    'x-api-key': process.env.ANTHROPIC_API_KEY,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json'
+  }
+});
+```
+
+### 4.2 Playwright MCP
+```javascript
+// MCPクライアント（Phase 8実装済み）
+const client = new MCPStdioClient({
+  command: 'npx',
+  args: ['-y', '@playwright/mcp@latest']
+});
+
+await client.connect();
+
+const result = await client.callTool('browser_navigate', {
+  url: 'https://example.com',
+  intent: 'Navigate to target page'
+});
+```
+
+---
+
+## 5. エラーハンドリング
+
+### 5.1 エラー種別
+| エラー種別 | 対応 |
+|-----------|------|
+| LLM API エラー | リトライ（3回まで、指数バックオフ） |
+| MCP通信エラー | セッション再接続 |
+| セレクタエラー | Healer起動 |
+| タイムアウト | Healer起動 |
+| 予期しないエラー | ログ記録してスキップ |
+
+---
+
+## 6. テスト戦略
+
+### 6.1 ユニットテスト
+- すべてのクラスに対してJestテスト
+- モック使用（LLM、MCP）
+- カバレッジ目標: 80%以上
+
+### 6.2 統合テスト
+- `__tests__/integration/full-cycle.test.js`
+- 実際のMCP通信あり（テストサイト使用）
+- 1イテレーション完全実行
+
+---
+
+## 7. 設定ファイル（config/default.json）
+
+```json
+{
+  "maxIterations": 10,
+  "coverageTarget": 80,
+  "browser": "chromium",
+  "outputDir": "./reports",
+  "testAspectsCSV": "./config/test-ViewpointList.csv",
+  "autoHeal": true,
+  "llmProvider": "claude",
+  "llmConfig": {
+    "claude": {
+      "model": "claude-3-5-sonnet-20241022",
+      "maxTokens": 4000,
+      "temperature": 0.7,
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    },
+    "openai": {
+      "model": "gpt-4",
+      "maxTokens": 4000,
+      "temperature": 0.7,
+      "apiKey": "${OPENAI_API_KEY}"
+    }
+  },
+  "mcpConfig": {
+    "command": "npx",
+    "args": ["-y", "@playwright/mcp@latest"],
+    "timeout": 30000,
+    "retryConfig": {
+      "maxRetries": 3,
+      "initialDelay": 1000,
+      "maxDelay": 10000,
+      "backoffMultiplier": 2
+    }
+  }
+}
+```
+
+---
+
+**作成者**: Othello開発チーム  
+**最終更新**: 2025年10月23日  
+**バージョン**: 2.0（Phase 9版）

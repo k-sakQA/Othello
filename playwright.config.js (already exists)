@@ -1,0 +1,20 @@
+module.exports = {
+    testDir: 'tests',
+    timeout: 30000,
+    expect: {
+        timeout: 5000
+    },
+    reporter: 'list',
+    use: {
+        headless: true,
+        browserName: 'chromium'
+    }
+};
+
+const { test, expect } = require('@playwright/test');
+
+test('hello world test', async ({ page }) => {
+    await page.goto('http://localhost:3000'); // Adjust the URL as needed
+    const helloWorldText = await page.locator('text=Hello World').isVisible();
+    expect(helloWorldText).toBe(true);
+});

@@ -1,27 +1,54 @@
 /**
- * Playwright MCPエージェント
- * Playwright MCPサーバーとの連携を管理
+ * Othello - セッション管理・中継レイヤー
+ * 
+ * Playwright AgentsとPlaywright MCPの間を取り持つ中核クラス。
+ * セッション管理、命令構造化、コンテキスト保持を担当します。
+ * 
+ * アーキテクチャ:
+ * 💭 自然言語層 → 🎭 Playwright Agents → ♟️ Othello（このクラス）
+ * → 🧩 MCP層 → 🌐 Playwright層
  */
 
 const fs = require('fs').promises;
 const path = require('path');
+const { MCPStdioClient } = require('./mcp-stdio-client');
 
-class PlaywrightAgent {
+class Othello {
   /**
    * @param {ConfigManager} config - 設定マネージャー
    * @param {Object} options - オプション設定
-   * @param {boolean} options.mockMode - モックモードを強制（デフォルト: エンドポイントの有無で自動判定）
+   * @param {boolean} options.mockMode - モックモードを強制
+   * @param {string} options.logFile - ログファイルパス（任意）
+   * @param {boolean} options.debugMode - デバッグモード（デフォルト: false）
    */
   constructor(config, options = {}) {
     this.config = config;
     this.browser = config.config.default_browser || 'chromium';
     this.timeout = (config.config.timeout_seconds || 300) * 1000; // ミリ秒に変換
     
-    // Playwright MCPエンドポイント
-    this.mcpEndpoint = config.config.playwright_agent?.api_endpoint || null;
+    // モックモード（オプションで上書き可能、設定で判定）
+    this.mockMode = options.mockMode !== undefined ? options.mockMode : 
+                    (config.config.playwright_agent?.mock_mode !== false);
     
-    // モックモード（オプションで上書き可能、デフォルトはエンドポイントの有無で判定）
-    this.mockMode = options.mockMode !== undefined ? options.mockMode : !this.mcpEndpoint;
+    // Stdio通信用のMCPクライアント
+    this.mcpClient = null;
+    this.isSessionInitialized = false;
+    this.browserLaunched = false;
+    
+    // ログ機能設定
+    this.logFile = options.logFile || null;
+    this.debugMode = options.debugMode || false;
+    this.executionHistory = [];
+    this.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // エラーリカバリー設定
+    this.maxRetries = options.maxRetries || 0;
+    this.retryDelay = options.retryDelay || 1000; // 初期遅延: 1秒
+    this.backoffMultiplier = options.backoffMultiplier || 2; // 2倍ずつ増加
+    this.maxRetryDelay = options.maxRetryDelay || 30000; // 最大30秒
+    this.autoReconnect = options.autoReconnect !== undefined ? options.autoReconnect : true;
+    this.saveSnapshotOnFailure = options.saveSnapshotOnFailure || false;
+    this.snapshotDir = options.snapshotDir || './error-snapshots';
   }
 
   /**
@@ -36,32 +63,111 @@ class PlaywrightAgent {
       // 指示タイプの検証
       const validTypes = ['navigate', 'click', 'fill', 'screenshot', 'evaluate', 'wait'];
       if (!validTypes.includes(instruction.type)) {
-        return {
+        const result = {
           success: false,
           instruction: instruction.description || instruction.type,
           error: `サポートされていない指示タイプ: ${instruction.type}`,
           timestamp: new Date().toISOString(),
           duration_ms: Date.now() - startTime
         };
+        
+        await this.logExecution('warn', 'executeInstruction', {
+          instruction: instruction.type,
+          result
+        });
+        
+        return result;
       }
 
       // モックモードの場合はシミュレーション
       if (this.mockMode) {
-        return this.simulateInstruction(instruction, startTime);
+        const result = this.simulateInstruction(instruction, startTime);
+        
+        // モックモードでも失敗時はスナップショットを保存
+        if (!result.success) {
+          await this.saveFailureSnapshot(instruction, new Error(result.error));
+        }
+        
+        await this.logExecution('info', 'executeInstruction', {
+          mode: 'mock',
+          instruction: instruction.type,
+          result
+        });
+        
+        return result;
       }
 
-      // 実際のMCPサーバー呼び出し（将来の実装）
-      return await this.callMCPServer(instruction, startTime);
+      // 実際のMCPサーバー呼び出し
+      const result = await this.callMCPServer(instruction, startTime);
+      
+      await this.logExecution(
+        result.success ? 'info' : 'error',
+        'executeInstruction',
+        {
+          mode: 'real',
+          instruction: instruction.type,
+          result
+        }
+      );
+      
+      return result;
 
     } catch (error) {
-      return {
+      // 失敗時のスナップショットを保存
+      await this.saveFailureSnapshot(instruction, error);
+      
+      const result = {
         success: false,
         instruction: instruction.description || instruction.type,
         error: error.message,
         timestamp: new Date().toISOString(),
         duration_ms: Date.now() - startTime
       };
+      
+      await this.logExecution('error', 'executeInstruction', {
+        instruction: instruction.type,
+        error: error.message,
+        stack: error.stack
+      });
+      
+      // セッション切断エラーの場合、自動再接続を試みる
+      if (this.autoReconnect && this.isSessionDisconnected(error)) {
+        await this.logExecution('warn', 'executeInstruction', {
+          message: 'Session disconnected, attempting to reconnect...'
+        });
+        
+        try {
+          await this.initializeSession();
+          await this.logExecution('info', 'executeInstruction', {
+            message: 'Session reconnected successfully'
+          });
+        } catch (reconnectError) {
+          await this.logExecution('error', 'executeInstruction', {
+            message: 'Failed to reconnect session',
+            error: reconnectError.message
+          });
+        }
+      }
+      
+      return result;
     }
+  }
+
+  /**
+   * セッション切断エラーかどうかを判定
+   * @param {Error} error - エラーオブジェクト
+   * @returns {boolean}
+   */
+  isSessionDisconnected(error) {
+    const disconnectPatterns = [
+      /session.*closed/i,
+      /session.*disconnected/i,
+      /connection.*closed/i,
+      /websocket.*closed/i,
+      /mcp.*disconnected/i
+    ];
+    
+    return disconnectPatterns.some(pattern => pattern.test(error.message));
   }
 
   /**
@@ -115,15 +221,263 @@ class PlaywrightAgent {
   }
 
   /**
-   * MCP サーバーを呼び出し
+   * 実行ログを記録
+   * @param {string} level - ログレベル（info, warn, error）
+   * @param {string} action - アクション名
+   * @param {Object} data - ログデータ
+   * @returns {Promise<void>}
+   */
+  async logExecution(level, action, data) {
+    const logEntry = {
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      level,
+      action,
+      data,
+      // デバッグモード時はスタックトレースを含める
+      ...(this.debugMode && level === 'error' && { stackTrace: new Error().stack })
+    };
+
+    // メモリ内履歴に追加
+    this.executionHistory.push(logEntry);
+
+    // ログファイルが指定されている場合はファイルに追記
+    if (this.logFile) {
+      try {
+        // ディレクトリが存在しない場合は作成
+        const path = require('path');
+        const logDir = path.dirname(this.logFile);
+        await fs.mkdir(logDir, { recursive: true });
+        
+        await fs.appendFile(this.logFile, JSON.stringify(logEntry) + '\n', 'utf-8');
+      } catch (error) {
+        console.error(`Failed to write log to file: ${error.message}`);
+      }
+    }
+
+    // デバッグモード時はコンソールにも出力
+    if (this.debugMode) {
+      const prefix = `[${level.toUpperCase()}] [${action}]`;
+      console.log(`${prefix}:`, JSON.stringify(data, null, 2));
+    }
+  }
+
+  /**
+   * 実行履歴を取得
+   * @param {Object} filter - フィルター条件（level, action等）
+   * @returns {Array} フィルターされた実行履歴
+   */
+  getExecutionHistory(filter = {}) {
+    let history = [...this.executionHistory];
+
+    if (filter.level) {
+      history = history.filter(entry => entry.level === filter.level);
+    }
+
+    if (filter.action) {
+      history = history.filter(entry => entry.action === filter.action);
+    }
+
+    if (filter.since) {
+      const sinceTime = new Date(filter.since).getTime();
+      history = history.filter(entry => new Date(entry.timestamp).getTime() >= sinceTime);
+    }
+
+    return history;
+  }
+
+  /**
+   * 実行履歴をクリア
+   */
+  clearExecutionHistory() {
+    this.executionHistory = [];
+  }
+
+  /**
+   * 実行履歴をファイルに保存
+   * @param {string} filename - 保存先ファイルパス
+   * @returns {Promise<void>}
+   */
+  async saveExecutionHistory(filename) {
+    try {
+      const historyData = {
+        sessionId: this.sessionId,
+        savedAt: new Date().toISOString(),
+        totalEntries: this.executionHistory.length,
+        history: this.executionHistory
+      };
+
+      await fs.writeFile(filename, JSON.stringify(historyData, null, 2), 'utf-8');
+      
+      if (this.debugMode) {
+        console.log(`[DEBUG] Execution history saved to: ${filename}`);
+        console.log(`[DEBUG] Total entries: ${this.executionHistory.length}`);
+      }
+      
+      await this.logExecution('info', 'saveExecutionHistory', {
+        filename,
+        entriesCount: this.executionHistory.length
+      });
+    } catch (error) {
+      await this.logExecution('error', 'saveExecutionHistory', {
+        filename,
+        error: error.message,
+        ...(this.debugMode && { stackTrace: error.stack })
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * ファイルから実行履歴を読み込み
+   * @param {string} filename - 読み込み元ファイルパス
+   * @param {boolean} append - 既存の履歴に追加するか（デフォルト: false）
+   * @returns {Promise<Object>} 読み込んだ履歴データ
+   */
+  async loadExecutionHistory(filename, append = false) {
+    try {
+      const fileContent = await fs.readFile(filename, 'utf-8');
+      const historyData = JSON.parse(fileContent);
+
+      if (!append) {
+        this.executionHistory = historyData.history;
+      } else {
+        this.executionHistory.push(...historyData.history);
+      }
+
+      if (this.debugMode) {
+        console.log(`[DEBUG] Execution history loaded from: ${filename}`);
+        console.log(`[DEBUG] Loaded entries: ${historyData.totalEntries}`);
+        console.log(`[DEBUG] Original session ID: ${historyData.sessionId}`);
+        console.log(`[DEBUG] Saved at: ${historyData.savedAt}`);
+      }
+
+      await this.logExecution('info', 'loadExecutionHistory', {
+        filename,
+        entriesLoaded: historyData.totalEntries,
+        originalSessionId: historyData.sessionId,
+        append
+      });
+
+      return historyData;
+    } catch (error) {
+      await this.logExecution('error', 'loadExecutionHistory', {
+        filename,
+        error: error.message,
+        ...(this.debugMode && { stackTrace: error.stack })
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * MCPセッションを初期化（Stdio通信）
+   * @returns {Promise<void>}
+   */
+  async initializeSession() {
+    // すでに初期化済みの場合はスキップ
+    if (this.isSessionInitialized) {
+      return;
+    }
+    
+    try {
+      // MCPStdioClientを作成
+      this.mcpClient = new MCPStdioClient({
+        clientName: 'Othello',
+        clientVersion: '2.0.0',
+        serverArgs: [
+          // ブラウザタイプを指定（必要に応じて）
+          // '--browser', this.browser
+        ]
+      });
+
+      // Stdio通信で接続（initializeは自動実行される）
+      await this.mcpClient.connect();
+      
+      // セッション初期化完了（ブラウザは最初のツール呼び出し時に自動起動される）
+      this.isSessionInitialized = true;
+      this.browserLaunched = false;
+      
+      // ログ記録
+      await this.logExecution('info', 'initializeSession', {
+        sessionId: this.sessionId,
+        browser: this.browser,
+        mockMode: this.mockMode
+      });
+      
+    } catch (error) {
+      this.mcpClient = null;
+      this.isSessionInitialized = false;
+      
+      // エラーログ記録
+      await this.logExecution('error', 'initializeSession', {
+        error: error.message,
+        stack: error.stack
+      });
+      
+      throw new Error(`MCP session initialization failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * ブラウザを起動
+   * @returns {Promise<void>}
+   */
+  async launchBrowser() {
+    // ブラウザはMCPサーバー側で自動的に管理されるため、
+    // ここでは状態フラグの更新のみ
+    this.browserLaunched = true;
+  }
+
+  /**
+   * セッションをクローズ（Stdio通信）
+   * @returns {Promise<void>}
+   */
+  async closeSession() {
+    if (!this.isSessionInitialized) {
+      return;
+    }
+
+    try {
+      // MCPクライアントを切断
+      if (this.mcpClient) {
+        await this.mcpClient.disconnect();
+        this.mcpClient = null;
+      }
+      
+      // 状態をリセット
+      this.browserLaunched = false;
+      this.isSessionInitialized = false;
+      
+      // ログ記録
+      await this.logExecution('info', 'closeSession', {
+        sessionId: this.sessionId,
+        totalActions: this.executionHistory.length
+      });
+      
+    } catch (error) {
+      await this.logExecution('error', 'closeSession', {
+        error: error.message
+      });
+      console.error(`Session close error: ${error.message}`);
+    }
+  }
+
+
+
+  /**
+   * MCP サーバーを呼び出し（Stdio通信）
    * @param {Object} instruction - テスト指示
    * @param {number} startTime - 開始時刻
    * @returns {Promise<Object>} 実行結果
    */
   async callMCPServer(instruction, startTime) {
-    const axios = require('axios');
-    
     try {
+      // セッションが初期化されていない場合は自動初期化
+      if (!this.isSessionInitialized) {
+        await this.initializeSession();
+      }
+
       // アクションタイプをMCPツール名にマッピング
       const toolMapping = {
         navigate: 'browser_navigate',
@@ -139,30 +493,27 @@ class PlaywrightAgent {
         throw new Error(`Unsupported instruction type: ${instruction.type}`);
       }
 
-      // MCPリクエストパラメータを構築
-      const mcpRequest = {
-        method: 'tools/call',
-        params: {
-          name: toolName,
-          arguments: this.buildMCPArguments(instruction)
-        }
-      };
+      // MCP引数を構築
+      const mcpArguments = this.buildMCPArguments(instruction);
 
-      // MCPサーバーにリクエスト送信
-      const response = await axios.post(
-        this.mcpEndpoint,
-        mcpRequest,
-        {
-          timeout: this.timeout,
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream'
-          }
-        }
-      );
+      // MCPStdioClientでツールを呼び出し
+      const mcpResult = await this.mcpClient.callTool(toolName, mcpArguments);
 
-      // レスポンスを解析
-      return this.parseMCPResponse(response.data, instruction, startTime);
+      // 成功時のレスポンス処理
+      if (mcpResult.success) {
+        return {
+          success: true,
+          instruction: instruction.description || instruction.type,
+          type: instruction.type,
+          details: mcpResult.sections ? Object.fromEntries(mcpResult.sections) : {},
+          content: mcpResult.content,
+          timestamp: new Date().toISOString(),
+          duration_ms: Date.now() - startTime
+        };
+      } else {
+        // エラーレスポンス
+        throw new Error(mcpResult.error || 'MCP tool call failed');
+      }
 
     } catch (error) {
       // エラーハンドリング
@@ -171,7 +522,8 @@ class PlaywrightAgent {
         instruction: instruction.description || instruction.type,
         error: error.message || String(error),
         timestamp: new Date().toISOString(),
-        duration_ms: Date.now() - startTime
+        duration_ms: Date.now() - startTime,
+        status: 'error'
       };
     }
   }
@@ -228,54 +580,7 @@ class PlaywrightAgent {
     }
   }
 
-  /**
-   * MCPレスポンスを解析
-   * @param {Object} data - MCPレスポンスデータ
-   * @param {Object} instruction - テスト指示
-   * @param {number} startTime - 開始時刻
-   * @returns {Object} 実行結果
-   */
-  parseMCPResponse(data, instruction, startTime) {
-    // レスポンス検証
-    if (!data || !data.content || data.content.length === 0) {
-      return {
-        success: false,
-        instruction: instruction.description || instruction.type,
-        error: 'Invalid response from MCP server: empty content',
-        timestamp: new Date().toISOString(),
-        duration_ms: Date.now() - startTime
-      };
-    }
 
-    // コンテンツから結果を抽出
-    const content = data.content[0];
-    let result;
-
-    if (content.type === 'text') {
-      try {
-        result = JSON.parse(content.text);
-      } catch (e) {
-        result = { success: true, data: content.text };
-      }
-    } else if (content.type === 'image') {
-      result = {
-        success: true,
-        image: content.data,
-        mimeType: content.mimeType
-      };
-    } else {
-      result = { success: true, data: content };
-    }
-
-    // 統一形式に変換
-    return {
-      success: result.success !== false,
-      instruction: instruction.description || instruction.type,
-      details: result,
-      timestamp: new Date().toISOString(),
-      duration_ms: Date.now() - startTime
-    };
-  }
 
   /**
    * 完全なテストを実行
@@ -414,6 +719,126 @@ class PlaywrightAgent {
     // TODO: 実際のブラウザ終了処理
     throw new Error('Browser close not yet implemented');
   }
+
+  /**
+   * 指数バックオフ付き自動再試行
+   * @param {Function} action - 実行する非同期関数
+   * @param {string} actionName - アクション名（ログ用）
+   * @returns {Promise<any>} アクションの結果
+   */
+  async executeWithRetry(action, actionName = 'unknown') {
+    let lastError;
+    let attempts = 0;
+    const startTime = Date.now();
+
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      attempts = attempt + 1;
+
+      try {
+        // アクション実行
+        const result = await action();
+
+        // 成功時のログ
+        await this.logExecution('info', 'executeWithRetry', {
+          action: actionName,
+          attempts: attempts,
+          maxRetries: this.maxRetries,
+          success: true,
+          duration_ms: Date.now() - startTime
+        });
+
+        return result;
+
+      } catch (error) {
+        lastError = error;
+
+        // 最後の試行の場合はリトライしない
+        if (attempt === this.maxRetries) {
+          break;
+        }
+
+        // 指数バックオフ計算
+        const delay = Math.min(
+          this.retryDelay * Math.pow(this.backoffMultiplier, attempt),
+          this.maxRetryDelay
+        );
+
+        // リトライログ
+        await this.logExecution('warn', 'executeWithRetry', {
+          action: actionName,
+          attempt: attempts,
+          maxRetries: this.maxRetries,
+          error: error.message,
+          retryIn: delay,
+          nextAttempt: attempt + 2
+        });
+
+        // 待機
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    // 全ての試行が失敗
+    await this.logExecution('error', 'executeWithRetry', {
+      action: actionName,
+      attempts,
+      maxRetries: this.maxRetries,
+      success: false,
+      error: lastError.message,
+      duration_ms: Date.now() - startTime,
+      ...(this.debugMode && { stackTrace: lastError.stack })
+    });
+
+    throw lastError;
+  }
+
+  /**
+   * 失敗時のスナップショットを保存
+   * @param {Object} instruction - 失敗した指示
+   * @param {Error} error - 発生したエラー
+   * @returns {Promise<void>}
+   */
+  async saveFailureSnapshot(instruction, error) {
+    if (!this.saveSnapshotOnFailure) {
+      return;
+    }
+
+    try {
+      const fs = require('fs').promises;
+      const path = require('path');
+
+      // ディレクトリ作成
+      await fs.mkdir(this.snapshotDir, { recursive: true });
+
+      // スナップショットデータ
+      const snapshot = {
+        timestamp: new Date().toISOString(),
+        sessionId: this.sessionId,
+        instruction,
+        error: {
+          message: error.message,
+          stack: error.stack
+        },
+        executionHistory: this.executionHistory.slice(-5) // 直近5件
+      };
+
+      // ファイル名生成
+      const filename = `failure_${Date.now()}_${this.sessionId.split('_')[2]}.json`;
+      const filepath = path.join(this.snapshotDir, filename);
+
+      // 保存
+      await fs.writeFile(filepath, JSON.stringify(snapshot, null, 2), 'utf-8');
+
+      await this.logExecution('info', 'saveFailureSnapshot', {
+        filename,
+        filepath
+      });
+
+    } catch (snapshotError) {
+      // スナップショット保存のエラーはログのみ
+      console.error(`Failed to save failure snapshot: ${snapshotError.message}`);
+    }
+  }
 }
 
-module.exports = PlaywrightAgent;
+module.exports = Othello;

@@ -1,0 +1,148 @@
+[
+  {
+    "test_case_id": "TC001",
+    "aspect_no": 1,
+    "instructions": [
+      {
+        "type": "navigate",
+        "url": "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0",
+        "description": "予約ページを開く"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e3",
+        "selector": "h1",
+        "text": "宿泊予約",
+        "description": "ページタイトルが '宿泊予約' であることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e4",
+        "selector": "h2",
+        "text": "お得な特典付きプラン",
+        "description": "セクションタイトルが 'お得な特典付きプラン' であることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e5",
+        "selector": "p",
+        "text": "お一人様1泊7,000円〜、土日は25%アップ。1名様〜9名様、最長9泊",
+        "description": "プラン説明文が正しいことを確認"
+      },
+      {
+        "type": "verify_element_visible",
+        "ref": "e6",
+        "selector": "input[name='checkin']",
+        "description": "宿泊日入力フィールドが表示されていることを確認"
+      },
+      {
+        "type": "verify_element_visible",
+        "ref": "e7",
+        "selector": "input[name='nights']",
+        "description": "宿泊数入力フィールドが表示されていることを確認"
+      },
+      {
+        "type": "verify_element_visible",
+        "ref": "e8",
+        "selector": "input[name='guests']",
+        "description": "人数入力フィールドが表示されていることを確認"
+      },
+      {
+        "type": "verify_element_visible",
+        "ref": "e9",
+        "selector": "input[name='name']",
+        "description": "氏名入力フィールドが表示されていることを確認"
+      },
+      {
+        "type": "verify_element_visible",
+        "ref": "e10",
+        "selector": "select[name='contact']",
+        "description": "確認のご連絡ドロップダウンが表示されていることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e11",
+        "selector": "button",
+        "text": "予約内容を確認する",
+        "description": "予約内容確認ボタンが表示されていることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e12",
+        "selector": "footer",
+        "text": "© 2020-2025 Takeshi Kishi",
+        "description": "フッターの著作権情報が正しいことを確認"
+      }
+    ]
+  },
+  {
+    "test_case_id": "TC002",
+    "aspect_no": 2,
+    "instructions": [
+      {
+        "type": "navigate",
+        "url": "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0",
+        "description": "宿泊予約ページを開く"
+      },
+      {
+        "type": "click",
+        "ref": "e3",
+        "selector": "button:text('予約内容を確認する')",
+        "description": "予約内容を確認するボタンをクリック"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e4",
+        "selector": "text=宿泊日 必須",
+        "description": "宿泊日フィールドの必須エラーメッセージが表示されることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e5",
+        "selector": "text=宿泊数 必須",
+        "description": "宿泊数フィールドの必須エラーメッセージが表示されることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e6",
+        "selector": "text=人数 必須",
+        "description": "人数フィールドの必須エラーメッセージが表示されることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e7",
+        "selector": "text=氏名 必須",
+        "description": "氏名フィールドの必須エラーメッセージが表示されることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e8",
+        "selector": "text=確認のご連絡 必須",
+        "description": "確認のご連絡フィールドの必須エラーメッセージが表示されることを確認"
+      }
+    ]
+  },
+  {
+    "test_case_id": "TC003",
+    "aspect_no": 3,
+    "instructions": [
+      {
+        "type": "navigate",
+        "url": "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0",
+        "description": "宿泊予約ページを開く"
+      },
+      {
+        "type": "fill",
+        "ref": "textbox 氏名 必須",
+        "selector": "input[aria-label='氏名 必須']",
+        "value": "!@#$%^&*()_+",
+        "description": "名前フィールドに特殊文字を入力する"
+      },
+      {
+        "type": "verify_text_visible",
+        "selector": "text=特殊文字は使用できません",
+        "description": "特殊文字が入力できないか、適切なエラーメッセージが表示されることを確認"
+      }
+    ]
+  }
+]

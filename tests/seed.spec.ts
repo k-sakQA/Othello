@@ -1,7 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Test group', () => {
-  test('seed', async ({ page }) => {
-    // generate code here.
-  });
+test('seed', async ({ page }) => {
+  await page.goto('https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0');
 });
