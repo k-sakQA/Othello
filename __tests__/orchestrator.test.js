@@ -1,328 +1,405 @@
-const Orchestrator = require('../src/orchestrator');
-const ConfigManager = require('../src/config');
-const InstructionGenerator = require('../src/instruction-generator');
-const Analyzer = require('../src/analyzer');
-const ResultCollector = require('../src/result-collector');
+/**
+ * Orchestrator (Phase 9) Tests
+ * 8ステップイテレーションループの統合テスト
+ */
 
-const fs = require('fs').promises;
-const path = require('path');
+const Orchestrator = require('../src/orchestrator');
 
 describe('Orchestrator', () => {
   let orchestrator;
-  let mockConfig;
-  let testWorkspaceDir;
-
-  beforeAll(async () => {
-    const configPath = path.join(__dirname, 'fixtures', 'config', 'valid-config.json');
-    mockConfig = await ConfigManager.load(configPath);
-    
-    // テスト用ワークスペースディレクトリを作成
-    testWorkspaceDir = path.join(__dirname, 'fixtures', 'workspace');
-    await fs.mkdir(testWorkspaceDir, { recursive: true });
-  });
+  let mockPlanner, mockGenerator, mockExecutor, mockHealer, mockAnalyzer, mockReporter, mockPlaywrightMCP;
 
   beforeEach(() => {
-    // モックの依存関係を注入
-    const mockDependencies = {
-      configManager: mockConfig,
-      instructionGenerator: {
-        generate: jest.fn().mockResolvedValue([
-          { type: 'page', target: 'https://example.com/page1', priority: 'high' }
-        ])
-      },
-      analyzer: {
-        analyze: jest.fn()
-          .mockResolvedValueOnce({
-            coverage_summary: { percentage: 30, visited_pages: 2, tested_features: 5 },
-            uncovered: { pages: ['https://example.com/uncovered1'], elements: ['未テスト機能1'] }
-          })
-          .mockResolvedValueOnce({
-            coverage_summary: { percentage: 50, visited_pages: 4, tested_features: 8 },
-            uncovered: { pages: ['https://example.com/uncovered2'], elements: ['未テスト機能2'] }
-          })
-          .mockResolvedValueOnce({
-            coverage_summary: { percentage: 70, visited_pages: 6, tested_features: 12 },
-            uncovered: { pages: ['https://example.com/uncovered3'], elements: ['未テスト機能3'] }
-          })
-          .mockResolvedValue({
-            coverage_summary: { percentage: 90, visited_pages: 8, tested_features: 15 },
-            uncovered: { pages: [], elements: [] }
-          })
-      },
-      resultCollector: {
-        collect: jest.fn().mockResolvedValue({ iteration: 1, status: 'success' }),
-        saveJSON: jest.fn().mockResolvedValue(true),
-        saveCSV: jest.fn().mockResolvedValue(true)
-      }
+    // モックエージェント作成
+    mockPlanner = {
+      generateTestPlan: jest.fn()
     };
 
-    orchestrator = new Orchestrator(mockDependencies);
+    mockGenerator = {
+      generate: jest.fn()
+    };
+
+    mockExecutor = {
+      execute: jest.fn()
+    };
+
+    mockHealer = {
+      heal: jest.fn()
+    };
+
+    mockAnalyzer = {
+      analyze: jest.fn(),
+      analyzeWithHistory: jest.fn(),
+      shouldContinueTesting: jest.fn()
+    };
+
+    mockReporter = {
+      saveAllReports: jest.fn()
+    };
+
+    mockPlaywrightMCP = {
+      setupPage: jest.fn(),
+      closePage: jest.fn(),
+      snapshot: jest.fn()
+    };
+
+    // Orchestrator初期化
+    orchestrator = new Orchestrator({
+      url: 'https://example.com',
+      maxIterations: 5,
+      coverageTarget: 80,
+      autoHeal: true
+    });
+
+    // モック注入
+    orchestrator.planner = mockPlanner;
+    orchestrator.generator = mockGenerator;
+    orchestrator.executor = mockExecutor;
+    orchestrator.healer = mockHealer;
+    orchestrator.analyzer = mockAnalyzer;
+    orchestrator.reporter = mockReporter;
+    orchestrator.playwrightMCP = mockPlaywrightMCP;
   });
 
-  afterEach(async () => {
-    // テスト用ディレクトリをクリーンアップ
-    try {
-      await fs.rm(testWorkspaceDir, { recursive: true, force: true });
-    } catch (error) {
-      // エラーは無視
-    }
-  });
+  describe('constructor', () => {
+    it('デフォルト設定で初期化できる', () => {
+      const orch = new Orchestrator();
 
-  describe('execute()', () => {
-    test('反復テストを正常に実行できる', async () => {
-      // テスト設定をモック
-      mockConfig.max_iterations = 5;
-
-      const result = await orchestrator.execute();
-
-      expect(result).toBeDefined();
-      // モックは4回のanalyze呼び出しを設定しているが、4回目で90%に達して閾値超過で停止
-      expect(result.total_iterations).toBeGreaterThanOrEqual(3);
-      expect(result).toHaveProperty('coverage_reports');
-      expect(result.coverage_reports.length).toBeGreaterThanOrEqual(3);
+      expect(orch.config.url).toBe('https://example.com');
+      expect(orch.config.maxIterations).toBe(10);
+      expect(orch.config.coverageTarget).toBe(80);
+      expect(orch.config.autoHeal).toBe(true);
+      expect(orch.iteration).toBe(0);
+      expect(orch.history).toEqual([]);
     });
 
-    test('最大反復回数を超えない', async () => {
-      // テスト設定をモック
-      mockConfig.max_iterations = 5;
-
-      const result = await orchestrator.execute();
-
-      expect(result.total_iterations).toBeLessThanOrEqual(5);
-    });
-
-    test('反復間でカバレッジが向上しない場合は終了', async () => {
-      // 低カバレッジの模擬カバレッジデータを作成
-      const mockAnalyzer = {
-        analyze: jest.fn()
-          .mockResolvedValueOnce({ 
-            coverage_summary: { percentage: 10 },
-            uncovered: { pages: ['https://example.com/page1'], elements: [] }
-          })
-          .mockResolvedValueOnce({ 
-            coverage_summary: { percentage: 15 },
-            uncovered: { pages: ['https://example.com/page1'], elements: [] }
-          })
-          .mockResolvedValueOnce({ 
-            coverage_summary: { percentage: 15 },
-            uncovered: { pages: ['https://example.com/page1'], elements: [] }
-          })
-      };
-
-      const mockDependencies = {
-        configManager: mockConfig,
-        instructionGenerator: orchestrator.instructionGenerator,
-        analyzer: mockAnalyzer,
-        resultCollector: orchestrator.resultCollector
-      };
-
-      const customOrchestrator = new Orchestrator(mockDependencies);
-
-      const result = await customOrchestrator.execute();
-
-      // カバレッジが向上しない場合は2回目の反復で終了
-      expect(result.total_iterations).toBe(2);
-      expect(result.exit_reason).toBe('coverage_threshold_reached');
-    });
-  });
-
-  describe('generateInstructions()', () => {
-    test('カバレッジデータから新しいテスト指示を生成できる', async () => {
-      // 低カバレッジの模擬カバレッジデータを作成
-      const mockCoverageData = {
-        uncovered: {
-          pages: ['https://example.com/uncovered-page'],
-          elements: ['未テスト機能']
-        }
-      };
-
-      // モックの指示生成を設定
-      orchestrator.instructionGenerator.generate.mockResolvedValueOnce([
-        { type: 'page', target: 'https://example.com/uncovered-page', priority: 'high' }
-      ]);
-
-      const instructions = await orchestrator.generateInstructions(mockCoverageData);
-
-      expect(Array.isArray(instructions)).toBe(true);
-      expect(instructions.length).toBeGreaterThan(0);
-      expect(instructions[0]).toHaveProperty('target');
-      expect(instructions[0]).toHaveProperty('type');
-    });
-
-    test('未カバー領域がない場合は空の指示を返す', async () => {
-      const mockCoverageData = {
-        uncovered: {
-          pages: [],
-          elements: []
-        }
-      };
-
-      const instructions = await orchestrator.generateInstructions(mockCoverageData);
-
-      expect(instructions).toEqual([]);
-    });
-  });
-
-  describe('recordIteration()', () => {
-    test('反復結果を正しく記録できる', async () => {
-      const mockIterationResult = {
-        iteration: 1,
-        playwright_agent_results: {},
-        status: 'success'
-      };
-
-      await orchestrator.recordIteration(mockIterationResult);
-
-      // ログファイルの存在を確認
-      const logPath = path.join(mockConfig.getPath('logs'), `iteration_1.json`);
-      const logFile = await fs.readFile(logPath, 'utf8');
-      const savedLog = JSON.parse(logFile);
-
-      expect(savedLog).toEqual(mockIterationResult);
-    });
-
-    test('結果収集モジュールを呼び出す', async () => {
-      const mockResultCollector = {
-        collect: jest.fn().mockResolvedValue({ iteration: 1, status: 'success' }),
-        saveJSON: jest.fn().mockResolvedValue(true),
-        saveCSV: jest.fn().mockResolvedValue(true)
-      };
-
-      const mockDependencies = {
-        configManager: mockConfig,
-        instructionGenerator: orchestrator.instructionGenerator,
-        analyzer: orchestrator.analyzer,
-        resultCollector: mockResultCollector
-      };
-
-      const customOrchestrator = new Orchestrator(mockDependencies);
-
-      const mockIterationResult = {
-        iteration: 1,
-        playwright_agent_results: {},
-        status: 'success'
-      };
-
-      await customOrchestrator.recordIteration(mockIterationResult);
-
-      expect(mockResultCollector.collect).toHaveBeenCalledWith(mockIterationResult);
-      expect(mockResultCollector.saveJSON).toHaveBeenCalled();
-      expect(mockResultCollector.saveCSV).toHaveBeenCalled();
-    });
-  });
-
-  describe('shouldContinue()', () => {
-    test('カバレッジが改善していれば継続', () => {
-      const coverageHistory = [
-        { percentage: 10 },
-        { percentage: 20 },
-        { percentage: 30 }
-      ];
-
-      const result = orchestrator.shouldContinue(coverageHistory);
-
-      expect(result).toBe(true);
-    });
-
-    test('カバレッジ改善が一定期間ない場合は停止', () => {
-      const coverageHistory = [
-        { percentage: 10 },
-        { percentage: 10 },
-        { percentage: 10 }
-      ];
-
-      const result = orchestrator.shouldContinue(coverageHistory);
-
-      expect(result).toBe(false);
-    });
-
-    test('カバレッジ閾値を超えた場合は停止', () => {
-      // 新しいOrchestratorインスタンスを作成して閾値を設定
-      const customConfig = {
-        ...mockConfig,
-        coverage_threshold: {
-          target_percentage: 50,
-          stop_if_no_improvement: true
-        }
-      };
-
-      const customOrchestrator = new Orchestrator({
-        configManager: customConfig,
-        instructionGenerator: orchestrator.instructionGenerator,
-        analyzer: orchestrator.analyzer,
-        resultCollector: orchestrator.resultCollector
+    it('カスタム設定で初期化できる', () => {
+      const orch = new Orchestrator({
+        url: 'https://custom.com',
+        maxIterations: 3,
+        coverageTarget: 90,
+        autoHeal: false
       });
 
-      const coverageHistory = [
-        { percentage: 10 },
-        { percentage: 30 },
-        { percentage: 60 }
+      expect(orch.config.url).toBe('https://custom.com');
+      expect(orch.config.maxIterations).toBe(3);
+      expect(orch.config.coverageTarget).toBe(90);
+      expect(orch.config.autoHeal).toBe(false);
+    });
+  });
+
+  describe('shouldContinue', () => {
+    it('イテレーション数が上限未満なら続行', () => {
+      orchestrator.iteration = 3;
+      expect(orchestrator.shouldContinue()).toBe(true);
+    });
+
+    it('イテレーション数が上限に達したら停止', () => {
+      orchestrator.iteration = 5;
+      expect(orchestrator.shouldContinue()).toBe(false);
+    });
+
+    it('イテレーション数が上限を超えたら停止', () => {
+      orchestrator.iteration = 6;
+      expect(orchestrator.shouldContinue()).toBe(false);
+    });
+  });
+
+  describe('getCurrentCoverage', () => {
+    it('履歴が空の場合は初期値を返す', () => {
+      const coverage = orchestrator.getCurrentCoverage();
+
+      expect(coverage.aspectCoverage.percentage).toBe(0);
+      expect(coverage.aspectCoverage.tested).toBe(0);
+      expect(coverage.aspectCoverage.total).toBe(23);
+      expect(coverage.testCaseCoverage.total).toBe(0);
+    });
+
+    it('履歴がある場合は累積カバレッジを返す', () => {
+      orchestrator.history = [
+        {
+          iteration: 1,
+          executionResults: [
+            { aspect_no: 1, success: true },
+            { aspect_no: 2, success: false }
+          ]
+        }
       ];
 
-      const result = customOrchestrator.shouldContinue(coverageHistory);
+      mockAnalyzer.analyze.mockReturnValue({
+        aspectCoverage: {
+          total: 23,
+          tested: 2,
+          percentage: 8.7
+        },
+        testCaseCoverage: {
+          total: 2,
+          passed: 1,
+          failed: 1,
+          pass_rate: 50
+        }
+      });
 
-      expect(result).toBe(false);
+      const coverage = orchestrator.getCurrentCoverage();
+
+      expect(mockAnalyzer.analyze).toHaveBeenCalled();
+      expect(coverage.aspectCoverage.percentage).toBe(8.7);
+      expect(coverage.aspectCoverage.tested).toBe(2);
     });
   });
 
-  describe('エラーハンドリング', () => {
-    test('Playwrightエージェントの呼び出しに失敗した場合はエラーを記録', async () => {
-      const mockPlaywrightAgent = {
-        generateTests: jest.fn().mockRejectedValue(new Error('Agent connection failed'))
-      };
+  describe('isStagnant', () => {
+    it('履歴が3未満の場合は停滞と判定しない', () => {
+      orchestrator.history = [
+        { coverage: { aspectCoverage: { percentage: 10 } } }
+      ];
 
-      const mockDependencies = {
-        configManager: mockConfig,
-        instructionGenerator: orchestrator.instructionGenerator,
-        analyzer: orchestrator.analyzer,
-        resultCollector: orchestrator.resultCollector,
-        playwrightAgent: mockPlaywrightAgent
-      };
+      expect(orchestrator.isStagnant()).toBe(false);
+    });
 
-      const customOrchestrator = new Orchestrator(mockDependencies);
+    it('3回連続で1%未満の変化の場合は停滞と判定', () => {
+      orchestrator.history = [
+        { coverage: { aspectCoverage: { percentage: 50.0 } } },
+        { coverage: { aspectCoverage: { percentage: 50.3 } } },
+        { coverage: { aspectCoverage: { percentage: 50.5 } } }
+      ];
 
-      const result = await customOrchestrator.execute();
+      expect(orchestrator.isStagnant()).toBe(true);
+    });
 
-      expect(result.status).toBe('error');
-      expect(result.error_details).toBeDefined();
+    it('1%以上の変化がある場合は停滞と判定しない', () => {
+      orchestrator.history = [
+        { coverage: { aspectCoverage: { percentage: 50.0 } } },
+        { coverage: { aspectCoverage: { percentage: 51.5 } } },
+        { coverage: { aspectCoverage: { percentage: 53.0 } } }
+      ];
+
+      expect(orchestrator.isStagnant()).toBe(false);
+    });
+
+    it('ちょうど1%の変化の場合は停滞と判定', () => {
+      orchestrator.history = [
+        { coverage: { aspectCoverage: { percentage: 50.0 } } },
+        { coverage: { aspectCoverage: { percentage: 50.5 } } },
+        { coverage: { aspectCoverage: { percentage: 51.0 } } }
+      ];
+
+      expect(orchestrator.isStagnant()).toBe(true);
     });
   });
 
-  describe('統合フロー', () => {
-    test('カバレッジ向上のための完全な反復サイクル', async () => {
-      const result = await orchestrator.execute();
+  describe('runIteration', () => {
+    beforeEach(() => {
+      // 各エージェントのモック設定
+      mockPlanner.generateTestPlan.mockResolvedValue({
+        testCases: [
+          { test_case_id: 'TC-001', aspect_no: 1, instructions: [] }
+        ]
+      });
 
-      expect(result).toHaveProperty('total_iterations');
-      expect(result).toHaveProperty('coverage_reports');
-      expect(result).toHaveProperty('final_coverage');
-      expect(result.final_coverage.percentage).toBeGreaterThan(0);
+      mockGenerator.generate.mockResolvedValue({
+        testCases: [
+          { test_case_id: 'TC-001', aspect_no: 1, instructions: [] }
+        ]
+      });
+
+      mockExecutor.execute.mockResolvedValue({
+        success: true,
+        duration_ms: 100
+      });
+
+      mockAnalyzer.analyze.mockReturnValue({
+        aspectCoverage: {
+          total: 23,
+          tested: 1,
+          percentage: 4.3
+        },
+        testCaseCoverage: {
+          total: 1,
+          passed: 1,
+          failed: 0,
+          pass_rate: 100
+        }
+      });
+
+      mockPlaywrightMCP.snapshot.mockResolvedValue({
+        elements: []
+      });
+    });
+
+    it('成功した場合は履歴に追加される', async () => {
+      orchestrator.iteration = 1;
+      await orchestrator.runIteration();
+
+      expect(orchestrator.history).toHaveLength(1);
+      expect(orchestrator.history[0].iteration).toBe(1);
+      expect(orchestrator.history[0].testCases).toHaveLength(1);
+      expect(orchestrator.history[0].executionResults).toHaveLength(1);
+      expect(orchestrator.history[0].coverage).toBeDefined();
+    });
+
+    it('Healerが失敗テストを修復する', async () => {
+      orchestrator.iteration = 1;
+
+      // 最初は失敗
+      mockExecutor.execute
+        .mockResolvedValueOnce({
+          success: false,
+          error: 'Element not found',
+          snapshot: {}
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          duration_ms: 150
+        });
+
+      mockHealer.heal.mockResolvedValue({
+        healed: true,
+        fix_type: 'LOCATOR_FIX',
+        fixed_instructions: []
+      });
+
+      await orchestrator.runIteration();
+
+      expect(mockHealer.heal).toHaveBeenCalled();
+      expect(mockExecutor.execute).toHaveBeenCalledTimes(2);
+      expect(orchestrator.history[0].executionResults[0].success).toBe(true);
+      expect(orchestrator.history[0].executionResults[0].healed).toBe(true);
+    });
+
+    it('autoHealがfalseの場合はHealerを実行しない', async () => {
+      orchestrator.config.autoHeal = false;
+      orchestrator.iteration = 1;
+
+      mockExecutor.execute.mockResolvedValue({
+        success: false,
+        error: 'Element not found'
+      });
+
+      await orchestrator.runIteration();
+
+      expect(mockHealer.heal).not.toHaveBeenCalled();
+      expect(orchestrator.history[0].executionResults[0].success).toBe(false);
+    });
+  });
+
+  describe('generateFinalReport', () => {
+    it('最終レポートを生成する', async () => {
+      orchestrator.history = [
+        {
+          iteration: 1,
+          executionResults: [
+            { aspect_no: 1, success: true }
+          ]
+        }
+      ];
+
+      mockAnalyzer.analyzeWithHistory.mockReturnValue({
+        cumulativeCoverage: {
+          aspectCoverage: { percentage: 50 }
+        }
+      });
+
+      mockReporter.saveAllReports.mockResolvedValue({
+        json: 'report.json',
+        markdown: 'report.md',
+        html: 'report.html'
+      });
+
+      const reports = await orchestrator.generateFinalReport();
+
+      expect(mockAnalyzer.analyzeWithHistory).toHaveBeenCalled();
+      expect(mockReporter.saveAllReports).toHaveBeenCalled();
+      expect(reports.json).toBe('report.json');
+      expect(reports.markdown).toBe('report.md');
+      expect(reports.html).toBe('report.html');
+    });
+  });
+
+  describe('formatDuration', () => {
+    it('秒単位でフォーマットできる', () => {
+      expect(orchestrator.formatDuration(5000)).toBe('5s');
+    });
+
+    it('分秒単位でフォーマットできる', () => {
+      expect(orchestrator.formatDuration(125000)).toBe('2m 5s');
+    });
+
+    it('時分秒単位でフォーマットできる', () => {
+      expect(orchestrator.formatDuration(3725000)).toBe('1h 2m 5s');
+    });
+  });
+
+  describe('統合シナリオ', () => {
+    it('目標カバレッジ達成まで実行できる', async () => {
+      // Planner
+      mockPlanner.generateTestPlan.mockResolvedValue({
+        testCases: [
+          { test_case_id: 'TC-001', aspect_no: 1, instructions: [] }
+        ]
+      });
+
+      // Generator
+      mockGenerator.generate.mockResolvedValue({
+        testCases: [
+          { test_case_id: 'TC-001', aspect_no: 1, instructions: [] }
+        ]
+      });
+
+      // Executor - 成功
+      mockExecutor.execute.mockResolvedValue({
+        success: true,
+        duration_ms: 100
+      });
+
+      // Analyzer - カバレッジ増加
+      let callCount = 0;
+      mockAnalyzer.analyze.mockImplementation(() => {
+        callCount++;
+        return {
+          aspectCoverage: {
+            total: 23,
+            tested: callCount,
+            percentage: (callCount / 23) * 100
+          },
+          testCaseCoverage: {
+            total: callCount,
+            passed: callCount,
+            failed: 0,
+            pass_rate: 100
+          }
+        };
+      });
+
+      mockAnalyzer.shouldContinueTesting
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false); // 3回目で目標達成
+
+      mockAnalyzer.analyzeWithHistory.mockReturnValue({
+        cumulativeCoverage: {
+          aspectCoverage: { percentage: 85 }
+        }
+      });
+
+      // Reporter
+      mockReporter.saveAllReports.mockResolvedValue({
+        json: 'report.json',
+        markdown: 'report.md',
+        html: 'report.html'
+      });
+
+      // Playwright MCP
+      mockPlaywrightMCP.setupPage.mockResolvedValue();
+      mockPlaywrightMCP.closePage.mockResolvedValue();
+      mockPlaywrightMCP.snapshot.mockResolvedValue({ elements: [] });
+
+      await orchestrator.run();
+
+      expect(orchestrator.iteration).toBe(3);
+      expect(orchestrator.history).toHaveLength(3);
+      expect(mockReporter.saveAllReports).toHaveBeenCalled();
+      expect(mockPlaywrightMCP.closePage).toHaveBeenCalled();
     });
   });
 });
-
-// ヘルパー関数: PlaywrightエージェントやClaude AIのモックを作成
-function createMockPlaywrightAgent() {
-  return {
-    generateTests: jest.fn().mockResolvedValue([
-      {
-        name: 'テスト1',
-        target: 'https://example.com/page1',
-        type: 'page_coverage'
-      }
-    ])
-  };
-}
-
-function createMockClaudeAPI() {
-  return {
-    optimize: jest.fn().mockResolvedValue({
-      optimized_instructions: [
-        {
-          name: '改善されたテスト',
-          target: 'https://example.com/page2',
-          type: 'feature_coverage'
-        }
-      ]
-    })
-  };
-}

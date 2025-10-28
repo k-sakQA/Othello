@@ -1,8 +1,40 @@
 # Othello ♟️
 
-**セッション管理・中継レイヤー** - Playwright Agentsと Playwright MCPの間を取り持つ中核基盤
+**Phase 9 完全統合システム** - 7つの専門エージェントによる完全自動テストフレームワーク
 
-Playwright AgentsとPlaywright MCPの間で、セッション管理・命令構造化・コンテキスト保持を担当する中継レイヤーです。
+Othelloは、Web UIの自動テスト生成・実行・修復・レポーティングを完全自動化する統合フレームワークです。23観点からテストを自動生成し、失敗を自動修復し、目標カバレッジ達成まで自律的にイテレーションを実行します。
+
+## ✨ Phase 9 の特徴
+
+- **🎯 完全自動化**: URLを指定するだけで、テスト計画→生成→実行→修復→レポートまで全自動
+- **🔧 自動修復**: 失敗テストを4種類の修復戦略（LOCATOR_FIX, WAIT_FIX, ACTION_FIX, INSTRUCTION_FIX）で自動修復
+- **📊 23観点カバレッジ**: JIS品質特性に基づく23観点でカバレッジを自動計算
+- **📈 3形式レポート**: JSON（機械可読）、Markdown（GitHub）、HTML（ブラウザ）で自動レポート生成
+- **🔄 8ステップループ**: Planner→Generator→Executor→Healer→Analyzer→Reporter の統合ループ
+- **🛑 停滞検出**: カバレッジが停滞したら自動終了（リソース効率化）
+
+## 🎭 7つの専門エージェント
+
+### 1. Othello-Planner (16/16 tests ✅)
+23観点CSVから未カバー観点に基づいてテスト計画を生成
+
+### 2. Othello-Generator (20/20 tests ✅)
+テスト計画をPlaywright MCP命令に変換
+
+### 3. Othello-Executor (23/23 tests ✅)
+MCP命令を実行してテスト結果を取得
+
+### 4. Othello-Healer (19/19 tests ✅)
+失敗テストを分析して4種類の修復戦略で自動修復
+
+### 5. Othello-Analyzer (25/25 tests ✅)
+実行結果から観点カバレッジとテストケースカバレッジを計算
+
+### 6. Othello-Reporter (21/21 tests ✅)
+JSON/Markdown/HTMLの3形式でレポートを生成
+
+### 7. Othello-Orchestrator (NEW! ✨)
+6つのエージェントを統合し、8ステップイテレーションループを実行
 
 ## 🏗️ アーキテクチャ
 
