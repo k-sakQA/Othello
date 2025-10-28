@@ -87,17 +87,43 @@ JSON/Markdown/HTMLの3形式でレポートを生成
 - テスト状態の追跡
 - デバッグ情報の蓄積
 
-## 🚀 使い方
+## 🚀 クイックスタート
 
-### 基本的な使用方法
+### CLIから実行（推奨）
+
+```bash
+# 基本的な使い方
+othello --url https://hotel.example.com
+
+# カスタム設定
+othello \
+  --url https://hotel.example.com \
+  --max-iterations 10 \
+  --coverage-target 90 \
+  --output-dir ./my-reports
+
+# 自動修復なし
+othello --url https://example.com --no-auto-heal
+
+# ヘルプ表示
+othello --help
+```
+
+### プログラマティック使用
 
 ```javascript
-const Othello = require('./src/playwright-agent');
+const Orchestrator = require('./src/orchestrator');
 
-// Othelloインスタンス作成
-const othello = new Othello(config, { mockMode: false });
+// Orchestratorインスタンス作成
+const orchestrator = new Orchestrator({
+  url: 'https://hotel.example.com',
+  maxIterations: 10,
+  coverageTarget: 80,
+  autoHeal: true
+});
 
-// セッション初期化
+// 実行
+await orchestrator.run();
 await othello.initializeSession();
 
 // Snapshotを取得してページ構造を理解
