@@ -1,0 +1,88 @@
+[
+  {
+    "test_case_id": "TC001",
+    "aspect_no": 4,
+    "instructions": [
+      {
+        "type": "navigate",
+        "url": "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0",
+        "description": "予約ページを開く"
+      },
+      {
+        "type": "fill",
+        "ref": "e10",
+        "selector": "input[name='name']",
+        "value": "山田太郎",
+        "description": "氏名フィールドに「山田太郎」を入力"
+      },
+      {
+        "type": "fill",
+        "ref": "e11",
+        "selector": "input[name='phone']",
+        "value": "090-1234-5678",
+        "description": "電話番号フィールドに「090-1234-5678」を入力"
+      },
+      {
+        "type": "fill",
+        "ref": "e12",
+        "selector": "input[name='email']",
+        "value": "yamada@example.com",
+        "description": "メールアドレスフィールドに「yamada@example.com」を入力"
+      },
+      {
+        "type": "click",
+        "ref": "e20",
+        "selector": "button[type='submit']",
+        "description": "予約ボタンをクリック"
+      },
+      {
+        "type": "wait_for",
+        "description": "確認ページへの遷移を待機"
+      },
+      {
+        "type": "verify_text_visible",
+        "selector": "text=山田太郎",
+        "description": "確認ページに氏名「山田太郎」が表示されることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "selector": "text=090-1234-5678",
+        "description": "確認ページに電話番号「090-1234-5678」が表示されることを確認"
+      },
+      {
+        "type": "verify_text_visible",
+        "selector": "text=yamada@example.com",
+        "description": "確認ページにメールアドレス「yamada@example.com」が表示されることを確認"
+      }
+    ]
+  },
+  {
+    "test_case_id": "TC002",
+    "aspect_no": 9,
+    "instructions": [
+      {
+        "type": "navigate",
+        "url": "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0",
+        "description": "予約ページを開く"
+      },
+      {
+        "type": "click",
+        "ref": "e20",
+        "selector": "button:has-text('予約する')",
+        "description": "予約ボタンをクリック"
+      },
+      {
+        "type": "verify_text_visible",
+        "ref": "e30",
+        "selector": "text=氏名を入力してください",
+        "description": "エラーメッセージ「氏名を入力してください」が表示されることを確認"
+      },
+      {
+        "type": "verify_element_visible",
+        "ref": "e20",
+        "selector": "button:has-text('予約する')[disabled]",
+        "description": "予約ボタンが非活性であることを確認"
+      }
+    ]
+  }
+]
