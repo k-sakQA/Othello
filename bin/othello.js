@@ -10,6 +10,8 @@
  *   othello --url https://example.com --no-auto-heal
  */
 
+require('dotenv').config();
+
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const path = require('path');
@@ -22,6 +24,9 @@ const OthelloExecutor = require('../src/agents/othello-executor');
 const OthelloHealer = require('../src/agents/othello-healer');
 const Analyzer = require('../src/analyzer');
 const Reporter = require('../src/reporter');
+const { LLMFactory } = require('../src/llm/llm-factory');
+const PlaywrightAgent = require('../src/playwright-agent');
+const ConfigManager = require('../src/config');
 
 // コマンドライン引数の定義
 const argv = yargs(hideBin(process.argv))
@@ -77,6 +82,12 @@ const argv = yargs(hideBin(process.argv))
     type: 'boolean',
     description: 'Enable verbose logging',
     default: false
+  })
+  .option('llm-provider', {
+    type: 'string',
+    description: 'LLM provider (openai, claude, mock)',
+    default: process.env.LLM_PROVIDER || 'mock',
+    choices: ['openai', 'claude', 'mock']
   })
   .option('config', {
     type: 'string',
@@ -136,7 +147,8 @@ async function main() {
       testAspectsCsv: argv['test-aspects-csv'],
       browser: argv.browser,
       headless: argv.headless,
-      verbose: argv.verbose
+      verbose: argv.verbose,
+      llmProvider: argv['llm-provider']
     };
     
     // 設定ファイルから読み込み（オプション）
@@ -168,6 +180,7 @@ async function main() {
       console.log(`  Max Iterations: ${config.maxIterations}`);
       console.log(`  Coverage Target: ${config.coverageTarget}%`);
       console.log(`  Auto-Heal: ${config.autoHeal}`);
+      console.log(`  LLM Provider: ${config.llmProvider}`);
       console.log(`  Browser: ${config.browser}`);
       console.log(`  Headless: ${config.headless}`);
       console.log(`  Output Directory: ${config.outputDir}\n`);
@@ -176,9 +189,19 @@ async function main() {
     // 出力ディレクトリの作成
     await fs.mkdir(config.outputDir, { recursive: true });
     
-    // モックLLMの初期化（現在はMock、後で実際のLLM接続に置き換え）
-    const llm = {
-      async chat(options) {
+    // LLMの初期化
+    console.log(`🤖 Initializing LLM (${config.llmProvider})...`);
+    const llm = LLMFactory.create(config.llmProvider, {
+      apiKey: config.llmProvider === 'openai' ? process.env.OPENAI_API_KEY : process.env.ANTHROPIC_API_KEY,
+      model: config.llmProvider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20241022',
+      maxTokens: 4000,
+      temperature: 0.7
+    });
+    
+    // Mockの場合のみ、フォールバック実装を追加
+    if (config.llmProvider === 'mock') {
+      const originalChat = llm.chat.bind(llm);
+      llm.chat = async function(options) {
         const messages = options.messages || [];
         const userMessage = messages.find(m => m.role === 'user')?.content || '';
         
@@ -257,32 +280,56 @@ test('Fixed test', async ({ page }) => {
         }
         
         return { content };
-      },
-      async generateText(prompt) {
-        const response = await this.chat({ messages: [{ role: 'user', content: prompt }] });
-        return response.content;
-      }
-    };
+      };
+    }
     
-    // モックPlaywright MCPの初期化（エージェント初期化前に必要）
+    console.log('✅ LLM initialized\n');
+    
+    // ConfigManagerの初期化（Playwright Agent用）
+    const configManager = new ConfigManager({
+      default_browser: config.browser,
+      headless: config.headless,
+      timeout_seconds: 30,
+      max_iterations: config.maxIterations,
+      paths: {
+        test_aspects_csv: config.testAspectsCsv || './data/test-aspects.csv',
+        logs: path.join(config.outputDir, 'logs'),
+        results: path.join(config.outputDir, 'results'),
+        test_instructions: path.join(config.outputDir, 'test_instructions'),
+        reports: config.outputDir
+      }
+    });
+    
+    // Playwright Agentの初期化
+    console.log('🌐 Initializing Playwright Agent...');
+    const playwrightAgent = new PlaywrightAgent(configManager, {
+      mockMode: false, // 実際のPlaywright MCPを使用
+      debugMode: config.verbose
+    });
+    
+    // Playwright Agentを初期化
+    try {
+      await playwrightAgent.initialize();
+      console.log('✅ Playwright Agent initialized\n');
+    } catch (error) {
+      console.error('❌ Failed to initialize Playwright Agent:', error.message);
+      console.log('⚠️  Falling back to mock mode...\n');
+      playwrightAgent.mockMode = true;
+    }
+    
+    // OrchestratorのためのPlaywright MCPラッパー
     const playwrightMCP = {
       async setupPage(url) {
         console.log(`  Setting up page: ${url}`);
+        await playwrightAgent.navigateToPage(url);
         return { success: true };
       },
       async snapshot() {
-        return {
-          url: config.url,
-          title: 'ホテル予約サイト',
-          elements: [
-            { type: 'input', name: 'username', label: '名前' },
-            { type: 'input', name: 'email', label: 'メールアドレス' },
-            { type: 'button', text: '予約する' }
-          ]
-        };
+        return await playwrightAgent.captureSnapshot();
       },
       async closePage() {
         console.log('  Closing page...');
+        await playwrightAgent.close();
         return { success: true };
       }
     };
