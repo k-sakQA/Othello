@@ -45,11 +45,20 @@ class OthelloGenerator {
         messages: [
           { 
             role: 'system', 
-            content: 'あなたはテスト自動化の専門家です。テストケースをPlaywright MCP命令に変換してください。' 
+            content: `あなたはテスト自動化の専門家です。テストケースをPlaywright MCP命令に変換してください。
+
+**JSON出力の厳格なルール:**
+1. 必ず有効なJSON構文で出力してください
+2. 末尾カンマは絶対に禁止です
+3. 文字列は必ずダブルクォート(")で囲んでください
+4. コメント(//, /*)は禁止です
+5. 改行は\\nでエスケープしてください
+6. プロパティ名も必ずダブルクォートで囲んでください
+7. JSON以外のテキスト（説明文など）は出力しないでください` 
           },
           { role: 'user', content: prompt }
         ],
-        temperature: 0.3, // より決定的な出力
+        temperature: 0.1,
         maxTokens: 3000
       });
 
@@ -110,11 +119,11 @@ ${snapshotFormatted}
 【使用可能なMCP命令タイプ】
 - navigate: ページ遷移
 - fill: テキスト入力
-- click: クリック
-- select_option: ドロップダウン選択
-- verify_text_visible: テキスト表示確認
-- verify_element_visible: 要素表示確認
-- wait_for: 待機
+- click: クリック  
+- wait: 待機
+
+注意: verify系の命令(verify_text_visible, verify_element_visible)は現在サポートされていません。
+検証は期待値を満たす操作(fill, click)の成功で代替してください。
 
 【重要: refの使い方】
 必ず Page Snapshot に記載されている [ref=eXX] の値を使用してください。
@@ -161,12 +170,30 @@ JSON配列で出力してください：
 ]
 \`\`\`
 
-注意事項：
-- 各命令には description を必ず含めてください
-- ref は Snapshot に存在する場合のみ使用してください
-- selector は ref のフォールバックとして指定してください
+**重要な制約:**
+- 必ず有効なJSON構文で出力してください（末尾カンマ禁止、コメント禁止）
+- 文字列は必ずダブルクォート(")で囲んでください
+- description内の改行は\\nでエスケープしてください
+- refはSnapshot内に存在するもの（e16, e22, e48, e52, e59など）のみ使用してください
+- 各命令にはdescriptionを必ず含めてください
 - テスト手順と期待結果を忠実に反映してください
 `;
+  }
+
+  /**
+   * JSON文字列を修復
+   * @param {string} jsonStr - 壊れている可能性のあるJSON（コードブロック除去済み）
+   * @returns {string} 修復されたJSON
+   */
+  repairJSON(jsonStr) {
+    // 末尾カンマを削除
+    jsonStr = jsonStr.replace(/,\s*(\]|\})/g, '$1');
+    // シングルクォートをダブルクォートに
+    jsonStr = jsonStr.replace(/'/g, '"');
+    // コメントを削除 (// ... または /* ... */)
+    jsonStr = jsonStr.replace(/\/\/.*$/gm, '');
+    jsonStr = jsonStr.replace(/\/\*[\s\S]*?\*\//g, '');
+    return jsonStr.trim();
   }
 
   /**
@@ -176,21 +203,52 @@ JSON配列で出力してください：
    */
   parseGenerationResponse(content) {
     // Markdownコードブロックから抽出
-    const jsonMatch = content.match(/```json\n([\s\S]+?)\n```/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[1]);
-      } catch (error) {
-        throw new Error(`Failed to parse LLM response (code block): ${error.message}`);
-      }
+    let jsonStr = content.trim();
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1].trim();
     }
 
-    // 直接JSONをパース
     try {
-      return JSON.parse(content);
+      const parsed = JSON.parse(jsonStr);
+      return Array.isArray(parsed) ? parsed : [parsed];
     } catch (error) {
-      throw new Error(`Failed to parse LLM response: ${error.message}`);
+      // JSON修復を試みる
+      console.warn(`JSON parse failed, attempting repair: ${error.message}`);
+      console.warn('Original JSON:', jsonStr.substring(0, 200));
+      try {
+        const repairedJson = this.repairJSON(jsonStr);
+        console.warn('Repaired JSON:', repairedJson.substring(0, 200));
+        const parsed = JSON.parse(repairedJson);
+        console.log('✅ JSON successfully repaired');
+        return Array.isArray(parsed) ? parsed : [parsed];
+      } catch (repairError) {
+        console.error('Failed JSON:', jsonStr.substring(0, 500));
+        throw new Error(`Failed to parse LLM response even after repair: ${repairError.message}`);
+      }
     }
+  }
+
+  /**
+   * 壊れたJSONを修復する
+   * @param {string} jsonText - JSONテキスト
+   * @returns {string} 修復されたJSONテキスト
+   */
+  repairJSON(jsonText) {
+    // コメントを削除
+    jsonText = jsonText.replace(/\/\/.*$/gm, '');
+    jsonText = jsonText.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // 末尾のカンマを削除
+    jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1');
+
+    // 引用符のエスケープ問題を修正
+    jsonText = jsonText.replace(/\\'/g, "'");
+
+    // 改行を適切にエスケープ
+    jsonText = jsonText.replace(/\n(?=.*"[^"]*$)/g, '\\n');
+
+    return jsonText.trim();
   }
 
   /**

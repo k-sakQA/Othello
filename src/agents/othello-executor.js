@@ -111,9 +111,7 @@ class OthelloExecutor {
       'navigate',
       'click',
       'fill',
-      'verify_text_visible',
-      'verify_element_visible',
-      'wait_for',
+      'wait',
       'screenshot'
     ];
 
