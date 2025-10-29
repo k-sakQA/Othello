@@ -309,10 +309,13 @@ test('Fixed test', async ({ page }) => {
     
     // Playwright Agentを初期化
     try {
-      await playwrightAgent.initialize();
+      await playwrightAgent.initializeSession();
       console.log('✅ Playwright Agent initialized\n');
     } catch (error) {
       console.error('❌ Failed to initialize Playwright Agent:', error.message);
+      if (config.verbose) {
+        console.error('Stack trace:', error.stack);
+      }
       console.log('⚠️  Falling back to mock mode...\n');
       playwrightAgent.mockMode = true;
     }
@@ -321,15 +324,27 @@ test('Fixed test', async ({ page }) => {
     const playwrightMCP = {
       async setupPage(url) {
         console.log(`  Setting up page: ${url}`);
-        await playwrightAgent.navigateToPage(url);
-        return { success: true };
+        const result = await playwrightAgent.executeInstruction({
+          type: 'navigate',
+          url: url,
+          description: `Navigate to ${url}`
+        });
+        return result;
       },
       async snapshot() {
-        return await playwrightAgent.captureSnapshot();
+        if (playwrightAgent.mockMode || !playwrightAgent.mcpClient) {
+          // Mock mode: 簡易スナップショット
+          return {
+            url: config.url,
+            title: 'Mock Page',
+            content: '<html><body>Mock content</body></html>'
+          };
+        }
+        return await playwrightAgent.mcpClient.snapshot();
       },
       async closePage() {
         console.log('  Closing page...');
-        await playwrightAgent.close();
+        await playwrightAgent.closeSession();
         return { success: true };
       }
     };
@@ -338,7 +353,7 @@ test('Fixed test', async ({ page }) => {
     console.log('🚀 Initializing agents...');
     const planner = new OthelloPlanner({ llm, config });
     const generator = new OthelloGenerator({ llm, config });
-    const executor = new OthelloExecutor({ playwrightMCP, config });
+    const executor = new OthelloExecutor({ playwrightMCP: playwrightAgent, config });
     const healer = new OthelloHealer({ llm, config });
     
     // モックAnalyzer（Phase 9対応）

@@ -485,7 +485,9 @@ class Othello {
         fill: 'browser_type',
         screenshot: 'browser_take_screenshot',
         evaluate: 'browser_evaluate',
-        wait: 'browser_wait_for'
+        wait: 'browser_wait_for',
+        verify_element_visible: 'browser_verify_element_visible',
+        verify_text_visible: 'browser_verify_text_visible'
       };
 
       const toolName = toolMapping[instruction.type];
@@ -572,6 +574,19 @@ class Othello {
       case 'wait':
         return {
           time: instruction.duration / 1000, // ミリ秒→秒
+          intent: intent
+        };
+
+      case 'verify_element_visible':
+        return {
+          role: instruction.role || 'generic',
+          accessibleName: instruction.accessibleName || instruction.description || '',
+          intent: intent
+        };
+
+      case 'verify_text_visible':
+        return {
+          text: instruction.text || instruction.value || '',
           intent: intent
         };
 

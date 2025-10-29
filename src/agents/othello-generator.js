@@ -96,8 +96,16 @@ ${testCase.expected_results.map((result, i) => `${i + 1}. ${result}`).join('\n')
 【ページSnapshot（要素情報）】
 ${snapshotFormatted}
 
+【Snapshotの読み方】
+- textbox "宿泊日 必須" [ref=e16] → 宿泊日入力欄、refは"e16"
+- textbox "氏名 必須" [ref=e48] → 氏名入力欄、refは"e48"
+- button "予約内容を確認する" [ref=e59] → 確認ボタン、refは"e59"
+- checkbox "朝食バイキング" [ref=e35] → チェックボックス、refは"e35"
+- combobox "確認のご連絡 必須" [ref=e52] → ドロップダウン、refは"e52"
+
 【タスク】
 上記のテストケースを、Playwright MCP命令シーケンスに変換してください。
+必ず Snapshot に記載されている ref を使用してください。
 
 【使用可能なMCP命令タイプ】
 - navigate: ページ遷移
@@ -108,11 +116,14 @@ ${snapshotFormatted}
 - verify_element_visible: 要素表示確認
 - wait_for: 待機
 
-【セレクタ戦略（優先順位）】
-1. Snapshot の ref（最優先）
-2. data-testid 属性
-3. アクセシブルな名前（role + name）
-4. セマンティックセレクタ
+【重要: refの使い方】
+必ず Page Snapshot に記載されている [ref=eXX] の値を使用してください。
+例: [ref=e16] → "ref": "e16"
+例: [ref=e48] → "ref": "e48"  
+例: [ref=e59] → "ref": "e59"
+
+自分で ref を作成しないでください（reserve-button, input[name='...'] などは不可）。
+必ず Snapshot に表示されている ref の値を使用してください。
 
 【出力形式】
 JSON配列で出力してください：
@@ -130,16 +141,20 @@ JSON配列で出力してください：
       },
       {
         "type": "fill",
-        "ref": "e1",
-        "selector": "input[name='username']",
-        "value": "testuser",
-        "description": "ユーザー名を入力"
+        "ref": "e16",
+        "value": "2025/12/01",
+        "description": "宿泊日を入力"
+      },
+      {
+        "type": "fill",
+        "ref": "e48",
+        "value": "山田太郎",
+        "description": "氏名を入力"
       },
       {
         "type": "click",
-        "ref": "e2",
-        "selector": "button[type='submit']",
-        "description": "送信ボタンをクリック"
+        "ref": "e59",
+        "description": "予約内容を確認するボタンをクリック"
       }
     ]
   }

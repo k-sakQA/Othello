@@ -122,41 +122,50 @@ class OthelloExecutor {
     }
 
     try {
-      // MCP引数を構築
-      const args = this.buildMCPArguments(instruction);
+      // Othello形式の命令に変換
+      const othelloInstruction = {
+        type: instruction.type,
+        description: instruction.description || instruction.type
+      };
 
-      // MCPメソッドを呼び出し
-      let mcpResult;
+      // 命令タイプに応じてパラメータを追加
       switch (instruction.type) {
         case 'navigate':
-          mcpResult = await this.playwrightMCP.navigate(args);
+          othelloInstruction.url = instruction.url;
           break;
         case 'click':
-          mcpResult = await this.playwrightMCP.click(args);
+          othelloInstruction.selector = instruction.ref || instruction.selector;
           break;
         case 'fill':
-          mcpResult = await this.playwrightMCP.fill(args);
+          othelloInstruction.selector = instruction.ref || instruction.selector;
+          othelloInstruction.value = instruction.value || instruction.text;
           break;
         case 'verify_text_visible':
-          mcpResult = await this.playwrightMCP.verify_text_visible(args);
+          othelloInstruction.text = instruction.text;
           break;
         case 'verify_element_visible':
-          mcpResult = await this.playwrightMCP.verify_element_visible(args);
+          othelloInstruction.role = instruction.role || 'generic';
+          othelloInstruction.accessibleName = instruction.accessibleName || instruction.text || '';
           break;
         case 'wait_for':
-          mcpResult = await this.playwrightMCP.wait_for(args);
+          othelloInstruction.selector = instruction.ref || instruction.selector;
+          othelloInstruction.timeout = instruction.timeout;
           break;
         case 'screenshot':
-          mcpResult = await this.playwrightMCP.take_screenshot(args);
+          othelloInstruction.path = instruction.path;
           break;
       }
 
+      // Othelloのexecuteインstrunctionを呼び出し
+      const mcpResult = await this.playwrightMCP.executeInstruction(othelloInstruction);
+
       return {
-        success: true,
+        success: mcpResult.success,
         instruction_type: instruction.type,
         description: instruction.description,
         duration_ms: Date.now() - startTime,
-        mcp_result: mcpResult
+        mcp_result: mcpResult,
+        error: mcpResult.error
       };
 
     } catch (error) {
