@@ -46,7 +46,10 @@ class Orchestrator {
         this.iteration++;
         await this.runIteration();
         const currentCoverage = this.getCurrentCoverage();
-        if (this.analyzer && !this.analyzer.shouldContinueTesting(currentCoverage, this.config.coverageTarget)) {
+        const coveragePercentage = currentCoverage?.aspectCoverage?.percentage || 0;
+        // カバレッジ目標達成チェック
+        if (coveragePercentage >= this.config.coverageTarget) {
+          console.log(`Coverage target ${this.config.coverageTarget}% reached!`);
           break;
         }
         if (this.isStagnant()) {
@@ -55,6 +58,23 @@ class Orchestrator {
       }
       await this.generateFinalReport();
       this.endTime = new Date();
+      
+      // 実行結果を返す
+      const currentCoverage = this.getCurrentCoverage();
+      const coveragePercentage = currentCoverage?.aspectCoverage?.percentage || 0;
+      const passedTests = this.history.flatMap(h => h.executionResults).filter(r => r.success).length;
+      const failedTests = this.history.flatMap(h => h.executionResults).filter(r => !r.success).length;
+      const healedTests = this.history.flatMap(h => h.executionResults).filter(r => r.healed).length;
+      
+      return {
+        iterations: this.iteration,
+        coverage: coveragePercentage,
+        passed: passedTests,
+        failed: failedTests,
+        healed: healedTests,
+        duration: this.endTime - this.startTime,
+        history: this.history
+      };
     } catch (error) {
       console.error('Orchestrator failed:', error.message);
       throw error;
@@ -80,8 +100,13 @@ class Orchestrator {
       });
       iterationResults.testCases = testPlan.testCases;
       const snapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
-      const generatedTests = await this.generator.generate({ testCases: testPlan.testCases, snapshot });
-      for (const testCase of generatedTests.testCases) {
+      const generatedTests = await this.generator.generate({ 
+        testCases: testPlan.testCases, 
+        snapshot,
+        url: this.config.url 
+      });
+      // generatedTestsは配列で直接返される
+      for (const testCase of generatedTests) {
         const result = await this.executor.execute(testCase);
         iterationResults.executionResults.push({
           test_case_id: testCase.test_case_id,
@@ -108,7 +133,7 @@ class Orchestrator {
           }
         }
       }
-      const coverage = this.analyzer.analyze(iterationResults.executionResults);
+      const coverage = await this.analyzer.analyze(iterationResults.executionResults);
       iterationResults.coverage = coverage;
       this.history.push(iterationResults);
     } catch (error) {
