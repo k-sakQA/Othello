@@ -14,10 +14,67 @@ class Analyzer {
   }
 
   /**
-   * カバレッジ分析を実行
+   * Phase 9: 実行結果からテスト観点カバレッジを分析
+   * @param {Array} executionResults - 実行結果の配列
    * @returns {Promise<Object>} カバレッジデータ
    */
-  async analyze() {
+  async analyze(executionResults) {
+    // executionResultsが渡された場合は、テスト観点ベースの分析
+    if (executionResults && Array.isArray(executionResults) && executionResults.length > 0) {
+      return this.analyzeTestAspects(executionResults);
+    }
+    
+    // 引数なしの場合は従来のログベース分析
+    return this.analyzeLegacy();
+  }
+
+  /**
+   * テスト観点ベースのカバレッジ分析
+   * @param {Array} executionResults - 実行結果
+   * @returns {Object} カバレッジデータ
+   */
+  analyzeTestAspects(executionResults) {
+    // ユニークなaspect_noを取得
+    const coveredAspects = new Set();
+    const allAspects = new Set();
+    
+    for (const result of executionResults) {
+      if (result.aspect_no) {
+        allAspects.add(result.aspect_no);
+        if (result.success) {
+          coveredAspects.add(result.aspect_no);
+        }
+      }
+    }
+    
+    // テスト観点の総数を取得（Plannerが生成した観点数）
+    // 仮に10観点とする（実際はPlannerの結果から取得すべき）
+    const totalAspects = 10;
+    const covered = coveredAspects.size;
+    const percentage = (covered / totalAspects) * 100;
+    
+    // 未カバーの観点を特定
+    const uncoveredAspects = [];
+    for (let i = 1; i <= totalAspects; i++) {
+      if (!coveredAspects.has(i)) {
+        uncoveredAspects.push(i);
+      }
+    }
+    
+    return {
+      percentage,
+      covered,
+      total: totalAspects,
+      covered_aspects: Array.from(coveredAspects).sort((a, b) => a - b),
+      uncovered_aspects: uncoveredAspects
+    };
+  }
+
+  /**
+   * 従来のログベース分析
+   * @returns {Promise<Object>} カバレッジデータ
+   */
+  async analyzeLegacy() {
     try {
       // 全ログファイルを読み込み
       const logs = await this.loadAllLogs();

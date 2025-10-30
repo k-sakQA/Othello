@@ -40,7 +40,16 @@ class OthelloPlanner {
     return aspects;
   }
 
-  prioritizeAspects(aspects, existingCoverage) {
+  prioritizeAspects(aspects, existingCoverage, uncoveredAspects = []) {
+    // Phase 9: 未カバー観点を優先
+    if (uncoveredAspects.length > 0) {
+      // 未カバーの観点番号に対応するテスト観点を優先
+      const priority = aspects.filter(a => uncoveredAspects.includes(a.aspect_no));
+      const others = aspects.filter(a => !uncoveredAspects.includes(a.aspect_no));
+      return [...priority, ...others].slice(0, 10);
+    }
+    
+    // 従来のロジック
     const tested = existingCoverage?.aspectCoverage?.tested_aspects || [];
     const untested = aspects.filter(a => !tested.includes(a.aspect_no));
     
@@ -49,10 +58,10 @@ class OthelloPlanner {
   }
 
   async generateTestPlan(options) {
-    const { url, testAspectsCSV, existingCoverage, iteration = 1 } = options;
+    const { url, testAspectsCSV, existingCoverage, uncoveredAspects, iteration = 1 } = options;
     
     const aspects = await this.loadTestAspects(testAspectsCSV);
-    const priorityAspects = this.prioritizeAspects(aspects, existingCoverage || {});
+    const priorityAspects = this.prioritizeAspects(aspects, existingCoverage || {}, uncoveredAspects);
     const analysis = await this.analyzeWithLLM({ url, aspects: priorityAspects, existingCoverage, iteration });
     
     const testCases = this.extractTestCases(analysis);

@@ -44,15 +44,15 @@ class Orchestrator {
       }
       while (this.shouldContinue()) {
         this.iteration++;
-        await this.runIteration();
-        const currentCoverage = this.getCurrentCoverage();
-        const coveragePercentage = currentCoverage?.aspectCoverage?.percentage || 0;
-        // カバレッジ目標達成チェック
-        if (coveragePercentage >= this.config.coverageTarget) {
-          console.log(`Coverage target ${this.config.coverageTarget}% reached!`);
+        const iterationResult = await this.runIteration();
+        
+        // 早期終了チェック
+        if (iterationResult && iterationResult.earlyExit) {
           break;
         }
+        
         if (this.isStagnant()) {
+          console.log('\n⚠️  Coverage stagnant, stopping iterations...');
           break;
         }
       }
@@ -60,8 +60,8 @@ class Orchestrator {
       this.endTime = new Date();
       
       // 実行結果を返す
-      const currentCoverage = this.getCurrentCoverage();
-      const coveragePercentage = currentCoverage?.aspectCoverage?.percentage || 0;
+      const currentCoverage = await this.getCurrentCoverage();
+      const coveragePercentage = currentCoverage?.percentage || 0;
       const passedTests = this.history.flatMap(h => h.executionResults).filter(r => r.success).length;
       const failedTests = this.history.flatMap(h => h.executionResults).filter(r => !r.success).length;
       const healedTests = this.history.flatMap(h => h.executionResults).filter(r => r.healed).length;
@@ -93,10 +93,12 @@ class Orchestrator {
       coverage: null
     };
     try {
+      const currentCoverage = await this.getCurrentCoverage();
       const testPlan = await this.planner.generateTestPlan({
         url: this.config.url,
         testAspectsCSV: this.config.testAspectsCSV,
-        existingCoverage: this.getCurrentCoverage()
+        existingCoverage: currentCoverage,
+        uncoveredAspects: currentCoverage.uncovered_aspects || []
       });
       iterationResults.testCases = testPlan.testCases;
       const snapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
@@ -174,6 +176,20 @@ class Orchestrator {
       const coverage = await this.analyzer.analyze(iterationResults.executionResults);
       iterationResults.coverage = coverage;
       this.history.push(iterationResults);
+      
+      // 累積カバレッジを計算（全イテレーションの結果）
+      const allResults = this.history.flatMap(h => h.executionResults);
+      const cumulativeCoverage = await this.analyzer.analyze(allResults);
+      
+      if (cumulativeCoverage && cumulativeCoverage.percentage !== undefined) {
+        console.log(`\n📊 Iteration ${this.iteration}: Coverage ${cumulativeCoverage.percentage.toFixed(2)}% (${cumulativeCoverage.covered}/${cumulativeCoverage.total} aspects)`);
+        
+        // カバレッジ目標達成で早期終了
+        if (cumulativeCoverage.percentage >= this.config.coverageTarget) {
+          console.log(`🎯 Target coverage ${this.config.coverageTarget}% reached!`);
+          return { earlyExit: true, coverage: cumulativeCoverage };
+        }
+      }
     } catch (error) {
       console.error(`Iteration ${this.iteration} failed:`, error.message);
       throw error;
@@ -184,15 +200,18 @@ class Orchestrator {
     return this.iteration < this.config.maxIterations;
   }
 
-  getCurrentCoverage() {
+  async getCurrentCoverage() {
     if (this.history.length === 0) {
       return {
-        aspectCoverage: { total: 23, tested: 0, percentage: 0, tested_aspects: [], untested_aspects: Array.from({ length: 23 }, (_, i) => i + 1) },
-        testCaseCoverage: { total: 0, passed: 0, failed: 0, pass_rate: 0 }
+        percentage: 0,
+        covered: 0,
+        total: 10, // Plannerが生成する観点数
+        covered_aspects: [],
+        uncovered_aspects: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       };
     }
     const allResults = this.history.flatMap(h => h.executionResults);
-    return this.analyzer.analyze(allResults);
+    return await this.analyzer.analyze(allResults);
   }
 
   isStagnant() {
