@@ -116,19 +116,57 @@ class Orchestrator {
           error: result.error
         });
         if (!result.success && this.config.autoHeal) {
-          const healResult = await this.healer.heal({
-            test_case_id: testCase.test_case_id,
-            instructions: testCase.instructions,
-            error: result.error,
-            snapshot: result.snapshot
+          console.log(`\n🔧 Auto-healing test case: ${testCase.test_case_id}`);
+          
+          // Stage 1: Quick retry with wait (高速・低コスト - UI干渉の80%を解決)
+          const failedIndex = result.error?.instruction_index || 0;
+          const quickFixed = JSON.parse(JSON.stringify(testCase.instructions));
+          quickFixed.splice(failedIndex, 0, {
+            type: 'wait',
+            duration: 500,
+            description: 'Auto-inserted wait for UI stability'
           });
-          if (healResult.healed) {
-            testCase.instructions = healResult.fixed_instructions;
-            const retryResult = await this.executor.execute(testCase);
-            if (retryResult.success) {
-              const lastResult = iterationResults.executionResults[iterationResults.executionResults.length - 1];
-              lastResult.success = true;
-              lastResult.healed = true;
+          
+          const quickResult = await this.executor.execute({
+            ...testCase,
+            instructions: quickFixed
+          });
+          
+          if (quickResult.success) {
+            console.log(`   ✅ Quick fix succeeded (500ms wait)`);
+            testCase.instructions = quickFixed;
+            const lastResult = iterationResults.executionResults[iterationResults.executionResults.length - 1];
+            lastResult.success = true;
+            lastResult.healed = true;
+            lastResult.heal_method = 'quick_wait';
+            lastResult.heal_time_ms = Date.now() - result.timestamp;
+          } else {
+            // Stage 2: LLM-based Healer (深い分析 - セレクタ問題・複雑な問題を解決)
+            const currentSnapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
+            
+            const healResult = await this.healer.heal({
+              test_case_id: testCase.test_case_id,
+              instructions: testCase.instructions,
+              error: result.error,
+              snapshot: currentSnapshot
+            });
+            
+            if (healResult.success && healResult.fixed_instructions) {
+              console.log(`   🔧 Healer: ${healResult.root_cause}`);
+              testCase.instructions = healResult.fixed_instructions;
+              
+              const healerRetryResult = await this.executor.execute(testCase);
+              
+              if (healerRetryResult.success) {
+                const lastResult = iterationResults.executionResults[iterationResults.executionResults.length - 1];
+                lastResult.success = true;
+                lastResult.healed = true;
+                lastResult.heal_method = 'llm_analysis';
+                lastResult.root_cause = healResult.root_cause;
+                console.log(`   ✅ Auto-healed successfully!`);
+              }
+            } else if (healResult.is_bug) {
+              console.log(`   🐛 Potential bug detected: ${healResult.root_cause}`);
             }
           }
         }

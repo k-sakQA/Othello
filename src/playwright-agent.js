@@ -61,7 +61,7 @@ class Othello {
 
     try {
       // 指示タイプの検証
-      const validTypes = ['navigate', 'click', 'fill', 'screenshot', 'evaluate', 'wait'];
+      const validTypes = ['navigate', 'click', 'fill', 'screenshot', 'evaluate', 'wait', 'press_key'];
       if (!validTypes.includes(instruction.type)) {
         const result = {
           success: false,
@@ -486,6 +486,7 @@ class Othello {
         screenshot: 'browser_take_screenshot',
         evaluate: 'browser_evaluate',
         wait: 'browser_wait_for',
+        press_key: 'browser_press_key',
         verify_element_visible: 'browser_verify_element_visible',
         verify_text_visible: 'browser_verify_text_visible'
       };
@@ -574,6 +575,12 @@ class Othello {
       case 'wait':
         return {
           time: instruction.duration / 1000, // ミリ秒→秒
+          intent: intent
+        };
+
+      case 'press_key':
+        return {
+          key: instruction.key,
           intent: intent
         };
 

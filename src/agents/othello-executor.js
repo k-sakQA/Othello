@@ -18,9 +18,10 @@ class OthelloExecutor {
    * @param {Object} testCase - テストケース
    * @param {string} testCase.test_case_id - テストケースID
    * @param {Array} testCase.instructions - MCP命令配列
+   * @param {string} snapshot - 使用するSnapshot（オプション。Healer修復時に最新Snapshotを渡す）
    * @returns {Object} 実行結果
    */
-  async execute(testCase) {
+  async execute(testCase, snapshot = null) {
     // バリデーション
     if (!testCase.test_case_id) {
       throw new Error('test_case_id is required');
@@ -112,6 +113,7 @@ class OthelloExecutor {
       'click',
       'fill',
       'wait',
+      'press_key',
       'screenshot'
     ];
 
@@ -145,9 +147,15 @@ class OthelloExecutor {
           othelloInstruction.role = instruction.role || 'generic';
           othelloInstruction.accessibleName = instruction.accessibleName || instruction.text || '';
           break;
+        case 'wait':
+          othelloInstruction.duration = instruction.duration || instruction.time || 1000;
+          break;
         case 'wait_for':
           othelloInstruction.selector = instruction.ref || instruction.selector;
           othelloInstruction.timeout = instruction.timeout;
+          break;
+        case 'press_key':
+          othelloInstruction.key = instruction.key;
           break;
         case 'screenshot':
           othelloInstruction.path = instruction.path;

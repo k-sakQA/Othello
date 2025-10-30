@@ -106,7 +106,28 @@ class OthelloHealer {
 
     const snapshotText = this.formatSnapshotForPrompt(failureData.snapshot);
 
-    return `あなたはテスト自動化の専門家です。失敗したテストケースを分析してください。
+    return `あなたはWeb E2Eテスト自動化の専門家です。失敗したテストケースを分析し、根本原因を特定してください。
+
+【一般的なE2Eテストエラーパターン】
+1. **UI干渉エラー** ("intercepts pointer events", "not clickable")
+   - 原因: モーダル、ドロップダウン、オーバーレイ、ツールチップなどが要素を覆っている
+   - 解決: 干渉要素を閉じる操作を挿入（Escape、背景クリック、×ボタン）
+
+2. **タイミングエラー** ("timeout", "detached", "not visible")
+   - 原因: 非同期処理、アニメーション、動的DOM更新
+   - 解決: 適切な待機を挿入、または要素が安定するまで待つ
+
+3. **セレクタエラー** ("not found", "multiple elements")
+   - 原因: セレクタが不正確、要素のIDやクラスが変更された
+   - 解決: Snapshotから正しいref/selectorを特定して更新
+
+4. **スクロールエラー** ("not in viewport")
+   - 原因: 要素が表示範囲外
+   - 解決: スクロール操作を挿入
+
+5. **状態エラー** ("disabled", "readonly")
+   - 原因: フォームバリデーション、依存フィールド未入力
+   - 解決: 前提条件となる操作を挿入
 
 【テストケースID】
 ${failureData.test_case_id}
@@ -122,7 +143,7 @@ ${instructionsText}
 ${snapshotText}
 
 【タスク】
-以下を判定してください：
+上記のエラーパターンを参考に、以下を判定してください：
 
 1. **is_bug**: これは実際のバグか、テストスクリプトの問題か
    - true: アプリケーションのバグ
@@ -136,8 +157,31 @@ ${snapshotText}
    - update_multiple: 複数の命令を更新
    - add_ref: ref を追加
    - remove_instruction: 命令を削除
-   - insert_instruction: 命令を挿入
+   - insert_instruction: 命令を挿入（例: datepickerを閉じる、待機を追加）
    - add_wait: 待機を追加
+   
+   **一般的なUI干渉パターンの検出と修正**
+   以下のようなエラーの場合、UI要素が邪魔している可能性：
+   - "intercepts pointer events" → オーバーレイ、モーダル、ドロップダウンなどが要素を覆っている
+   - "not visible" → スクロールが必要、または他の要素に隠されている
+   - "detached from document" → 動的DOM更新でタイミング問題
+   
+   修正アプローチ（ケースバイケースでLLMが判断）：
+   - オーバーレイの場合: Escapeキー、背景クリック、明示的な閉じる操作
+   - スクロールの場合: スクロール操作を挿入
+   - タイミングの場合: 適切な待機を挿入
+   - DOMの場合: セレクタを更新、または要素が安定するまで待機
+   
+   **重要: 命令フォーマット**
+   新しい命令を挿入/追加する場合、以下の形式を厳守してください：
+   - type: 命令タイプ（click, type, wait等）
+   - ref: Snapshotから取得した要素のref（例: e16, e35）※refがない場合はtype='wait'を使用
+   - description: 命令の説明
+   
+   Snapshotで要素を探す方法：
+   - "- button \"ログイン\":" → このbuttonのrefは次の行の"ref: eXX"を確認
+   - "- textbox \"メールアドレス\":" → このtextboxのrefを確認
+   - 背景クリックなど、特定の要素がない場合は wait 命令を使用
 
 4. **bug_report**: バグの場合、バグレポート
 
@@ -176,6 +220,81 @@ JSON形式で出力してください：
     "expected": "...",
     "actual": "..."
   }
+}
+\`\`\`
+
+または（UI干渉問題の場合の例 - waitを使用）：
+
+\`\`\`json
+{
+  "is_bug": false,
+  "bug_type": null,
+  "root_cause": "datepickerが開いたままで背後の要素がクリックできない",
+  "suggested_fix": {
+    "type": "insert_instruction",
+    "instruction_index": 2,
+    "new_instruction": {
+      "type": "wait",
+      "duration": 1000,
+      "description": "datepickerが消えるまで待機（自動的に閉じるまで）"
+    }
+  },
+  "confidence": 0.90
+}
+\`\`\`
+
+または（UI干渉問題の場合の例 - Escapeキーを使用）：
+
+\`\`\`json
+{
+  "is_bug": false,
+  "bug_type": null,
+  "root_cause": "モーダルダイアログが開いたままで背後の要素がクリックできない",
+  "suggested_fix": {
+    "type": "insert_instruction",
+    "instruction_index": 2,
+    "new_instruction": {
+      "type": "press_key",
+      "key": "Escape",
+      "description": "Escapeキーでモーダルを閉じる"
+    }
+  },
+  "confidence": 0.90
+}
+\`\`\`
+
+または（タイミング問題の場合の例）：
+
+\`\`\`json
+{
+  "is_bug": false,
+  "bug_type": null,
+  "root_cause": "非同期処理中で要素がまだ表示されていない",
+  "suggested_fix": {
+    "type": "add_wait",
+    "instruction_index": 3,
+    "wait_time": 2,
+    "description": "要素が表示されるまで待機"
+  },
+  "confidence": 0.85
+}
+\`\`\`
+
+または（セレクタ問題の場合の例）：
+
+\`\`\`json
+{
+  "is_bug": false,
+  "bug_type": null,
+  "root_cause": "要素のrefが間違っている。Snapshotによると正しいrefはe48",
+  "suggested_fix": {
+    "type": "update_selector",
+    "instruction_index": 1,
+    "old_selector": "input[name='name']",
+    "new_selector": "textbox",
+    "ref": "e48"
+  },
+  "confidence": 0.95
 }
 \`\`\`
 
