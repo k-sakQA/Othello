@@ -87,10 +87,13 @@ class OthelloGenerator {
 
     return `あなたはテスト自動化の専門家です。
 
+【役割】
+Othello-Plannerが仕様書から生成した日本語のテストケースを、実際のWebサイトのSnapshot（DOM構造）を見ながらPlaywright MCP命令に変換します。
+
 【対象URL】
 ${url}
 
-【テストケース】
+【テストケース（仕様書ベース）】
 ID: ${testCase.test_case_id || testCase.case_id}
 タイトル: ${testCase.title || 'N/A'}
 優先度: ${testCase.priority || 'P2'}
@@ -102,7 +105,7 @@ ${testCase.steps.map((step, i) => `${i + 1}. ${step}`).join('\n')}
 【期待結果】
 ${testCase.expected_results.map((result, i) => `${i + 1}. ${result}`).join('\n')}
 
-【ページSnapshot（要素情報）】
+【実際のページSnapshot（要素情報）】
 ${snapshotFormatted}
 
 【Snapshotの読み方】
@@ -113,8 +116,11 @@ ${snapshotFormatted}
 - combobox "確認のご連絡 必須" [ref=e52] → ドロップダウン、refは"e52"
 
 【タスク】
-上記のテストケースを、Playwright MCP命令シーケンスに変換してください。
-必ず Snapshot に記載されている ref を使用してください。
+1. テストケースの手順を読む
+2. **実際のページSnapshot**から該当する要素のrefを見つける
+3. Playwright MCP命令シーケンスに変換する
+
+**重要**: 必ず Snapshot に記載されている ref を使用してください。
 
 【使用可能なMCP命令タイプ】
 - navigate: ページ遷移
@@ -245,8 +251,14 @@ JSON配列で出力してください：
     // 引用符のエスケープ問題を修正
     jsonText = jsonText.replace(/\\'/g, "'");
 
-    // 改行を適切にエスケープ
-    jsonText = jsonText.replace(/\n(?=.*"[^"]*$)/g, '\\n');
+    // 文字列値内の改行を削除または\\nに置換（文字列値内の改行はJSONで無効）
+    // 文字列値内のリテラル改行を空白に置換
+    jsonText = jsonText.replace(/"([^"]*?)"/g, (match, content) => {
+      const cleaned = content
+        .replace(/\r?\n/g, ' ')  // 改行を空白に
+        .replace(/\t/g, ' ');    // タブを空白に
+      return `"${cleaned}"`;
+    });
 
     return jsonText.trim();
   }

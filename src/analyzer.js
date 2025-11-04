@@ -19,13 +19,23 @@ class Analyzer {
    * @returns {Promise<Object>} カバレッジデータ
    */
   async analyze(executionResults) {
-    // executionResultsが渡された場合は、テスト観点ベースの分析
-    if (executionResults && Array.isArray(executionResults) && executionResults.length > 0) {
-      return this.analyzeTestAspects(executionResults);
+    // Phase 9: テスト観点ベースの分析のみを使用
+    if (!executionResults || !Array.isArray(executionResults) || executionResults.length === 0) {
+      // 空の場合はデフォルト値を返す
+      return {
+        percentage: 0,
+        covered: 0,
+        total: 10,
+        covered_aspects: [],
+        uncovered_aspects: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        tests_passed: 0,
+        tests_failed: 0,
+        tests_healed: 0,
+        total_tests: 0
+      };
     }
     
-    // 引数なしの場合は従来のログベース分析
-    return this.analyzeLegacy();
+    return this.analyzeTestAspects(executionResults);
   }
 
   /**
@@ -37,6 +47,9 @@ class Analyzer {
     // ユニークなaspect_noを取得
     const coveredAspects = new Set();
     const allAspects = new Set();
+    const passedTests = executionResults.filter(r => r.success).length;
+    const failedTests = executionResults.filter(r => !r.success).length;
+    const healedTests = executionResults.filter(r => r.healed).length;
     
     for (const result of executionResults) {
       if (result.aspect_no) {
@@ -61,12 +74,17 @@ class Analyzer {
       }
     }
     
+    // 統一フォーマット（エージェントが読みやすい形式）
     return {
       percentage,
       covered,
       total: totalAspects,
       covered_aspects: Array.from(coveredAspects).sort((a, b) => a - b),
-      uncovered_aspects: uncoveredAspects
+      uncovered_aspects: uncoveredAspects,
+      tests_passed: passedTests,
+      tests_failed: failedTests,
+      tests_healed: healedTests,
+      total_tests: executionResults.length
     };
   }
 

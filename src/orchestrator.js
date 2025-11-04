@@ -61,7 +61,10 @@ class Orchestrator {
       
       // 実行結果を返す
       const currentCoverage = await this.getCurrentCoverage();
-      const coveragePercentage = currentCoverage?.percentage || 0;
+      // 新旧フォーマット両対応
+      const coveragePercentage = currentCoverage?.percentage 
+        || currentCoverage?.aspectCoverage?.percentage 
+        || 0;
       const passedTests = this.history.flatMap(h => h.executionResults).filter(r => r.success).length;
       const failedTests = this.history.flatMap(h => h.executionResults).filter(r => !r.success).length;
       const healedTests = this.history.flatMap(h => h.executionResults).filter(r => r.healed).length;
@@ -217,22 +220,26 @@ class Orchestrator {
   isStagnant() {
     if (this.history.length < 3) return false;
     const recent = this.history.slice(-3);
-    const coverages = recent.map(h => h.coverage.aspectCoverage.percentage);
+    const coverages = recent.map(h => h.coverage?.percentage || 0);
     const maxDiff = Math.max(...coverages) - Math.min(...coverages);
     return maxDiff < 1.0;
   }
 
   async generateFinalReport() {
     this.endTime = new Date();
-    const analysis = this.analyzer.analyzeWithHistory(this.history.map(h => ({ iteration: h.iteration, results: h.executionResults })));
+    
+    // 全実行結果から最終カバレッジを計算
+    const allResults = this.history.flatMap(h => h.executionResults);
+    const finalCoverage = await this.analyzer.analyze(allResults);
+    
     const reportData = {
       sessionId: this.sessionId,
       startTime: this.startTime,
       endTime: this.endTime,
       totalDuration: this.endTime - this.startTime,
       iterations: this.iteration,
-      coverage: analysis.cumulativeCoverage,
-      executionResults: this.history.flatMap(h => h.executionResults)
+      coverage: finalCoverage,
+      executionResults: allResults
     };
     const reports = await this.reporter.saveAllReports(reportData, `session-${this.sessionId}`);
     return reports;

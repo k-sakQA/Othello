@@ -13,6 +13,38 @@ class OthelloPlanner {
     this.config = config || {};
   }
 
+  /**
+   * 仕様書を読み込む（spec/フォルダから）
+   * @param {string} specDir - 仕様書ディレクトリ
+   * @returns {Promise<string>} 仕様書の内容
+   */
+  async loadSpecifications(specDir = './spec') {
+    try {
+      const files = await fs.readdir(specDir);
+      const specFiles = files.filter(f => 
+        f.endsWith('.md') || f.endsWith('.txt') || f.endsWith('.pdf') || f.endsWith('.docx')
+      );
+      
+      if (specFiles.length === 0) {
+        console.warn('⚠️  spec/フォルダに仕様書が見つかりません。サイト探索モードで動作します。');
+        return null;
+      }
+      
+      // 複数ファイルがある場合は結合
+      const contents = [];
+      for (const file of specFiles) {
+        const filePath = path.join(specDir, file);
+        const content = await fs.readFile(filePath, 'utf-8');
+        contents.push(`## ${file}\n\n${content}`);
+      }
+      
+      return contents.join('\n\n---\n\n');
+    } catch (error) {
+      console.warn('⚠️  仕様書の読み込みに失敗しました:', error.message);
+      return null;
+    }
+  }
+
   async loadTestAspects(csvPath) {
     const csvContent = await fs.readFile(csvPath, 'utf-8');
     const rows = parseCSV(csvContent);
@@ -58,11 +90,20 @@ class OthelloPlanner {
   }
 
   async generateTestPlan(options) {
-    const { url, testAspectsCSV, existingCoverage, uncoveredAspects, iteration = 1 } = options;
+    const { url, testAspectsCSV, existingCoverage, uncoveredAspects, iteration = 1, specDir } = options;
+    
+    // 仕様書を読み込む
+    const specifications = await this.loadSpecifications(specDir || './spec');
     
     const aspects = await this.loadTestAspects(testAspectsCSV);
     const priorityAspects = this.prioritizeAspects(aspects, existingCoverage || {}, uncoveredAspects);
-    const analysis = await this.analyzeWithLLM({ url, aspects: priorityAspects, existingCoverage, iteration });
+    const analysis = await this.analyzeWithLLM({ 
+      url, 
+      aspects: priorityAspects, 
+      existingCoverage, 
+      iteration,
+      specifications 
+    });
     
     const testCases = this.extractTestCases(analysis);
     const markdown = this.formatAsMarkdown(analysis);
@@ -71,12 +112,12 @@ class OthelloPlanner {
   }
 
   async analyzeWithLLM(options) {
-    const { url, aspects, existingCoverage, iteration } = options;
-    const prompt = this.buildAnalysisPrompt({ url, aspects, existingCoverage, iteration });
+    const { url, aspects, existingCoverage, iteration, specifications } = options;
+    const prompt = this.buildAnalysisPrompt({ url, aspects, existingCoverage, iteration, specifications });
     
     const response = await this.llm.chat({
       messages: [
-        { role: 'system', content: 'あなたはテスト分析の専門家です。' },
+        { role: 'system', content: 'あなたはテスト分析の専門家です。仕様書とテスト観点リストに基づいて、日本語でテスト分析を行います。' },
         { role: 'user', content: prompt }
       ],
       temperature: 0.7,
@@ -86,10 +127,65 @@ class OthelloPlanner {
     return this.parseAnalysisResponse(response.content);
   }
 
-  buildAnalysisPrompt({ url, aspects, existingCoverage, iteration }) {
+  buildAnalysisPrompt({ url, aspects, existingCoverage, iteration, specifications }) {
     const aspectsList = aspects.map(a => `No.${a.aspect_no}: ${a.test_type_major}${a.test_type_minor ? ' - ' + a.test_type_minor : ''}\n観点: ${a.test_aspect}`).join('\n\n');
     
-    return `あなたはテスト分析の専門家です。
+    // 仕様書がある場合とない場合で分岐
+    if (specifications) {
+      return `あなたはテスト分析の専門家です。
+
+【対象URL】
+${url}
+
+【イテレーション】
+${iteration}回目
+
+【既存カバレッジ】
+${existingCoverage ? JSON.stringify(existingCoverage, null, 2) : 'なし'}
+
+【仕様書】
+${specifications}
+
+【テスト観点リスト】（優先度順）
+${aspectsList}
+
+【タスク】
+**仕様書**を読んで、各テスト観点について日本語でテスト分析を行ってください：
+
+1. **対象の機能構造**: 仕様書に記載されているどの機能・画面が該当するか
+2. **考慮すべき仕様の具体例**: 仕様書から抽出した具体的な仕様（3-5個）
+3. **狙うバグ**: この観点で見つけるべきバグの種類（2-3個）
+4. **テストケース**: 仕様書に基づく具体的なテスト手順と期待結果（1-2ケース）
+
+**重要**: サイトを探索せず、仕様書の内容のみに基づいてテスト分析を行ってください。
+
+【出力形式】
+JSON配列で出力してください：
+
+\`\`\`json
+[
+  {
+    "aspect_no": 1,
+    "test_type": "表示（UI）",
+    "test_category": "レイアウト/文言",
+    "target_function": "...",
+    "specifications": ["...", "..."],
+    "target_bugs": ["...", "..."],
+    "priority": "P0",
+    "test_cases": [
+      {
+        "case_id": "TC001",
+        "title": "...",
+        "steps": ["..."],
+        "expected_results": ["..."]
+      }
+    ]
+  }
+]
+\`\`\``;
+    } else {
+      // 仕様書がない場合は従来通りサイト探索モード
+      return `あなたはテスト分析の専門家です。
 
 【対象URL】
 ${url}
@@ -135,6 +231,7 @@ JSON配列で出力してください：
   }
 ]
 \`\`\``;
+    }
   }
 
   parseAnalysisResponse(content) {
