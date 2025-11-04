@@ -51,6 +51,29 @@ class Orchestrator {
           break;
         }
         
+        // 対話モードが有効な場合、推奨テストを表示
+        if (this.config.interactive && this.analyzer) {
+          const currentCoverage = await this.getCurrentCoverage();
+          const allResults = this.history.flatMap(h => h.executionResults);
+          const recommendations = await this.analyzer.generateRecommendations(
+            allResults,
+            currentCoverage
+          );
+          
+          if (recommendations && recommendations.length > 0) {
+            const userAction = await this.waitForUserAction(recommendations);
+            
+            if (userAction.type === 'exit') {
+              console.log('\n👋 ユーザーによる終了');
+              break;
+            } else if (userAction.type === 'specific') {
+              console.log(`\n▶️  選択されたテスト: ${userAction.recommendation.title}`);
+              // TODO: 特定のテストを実行する処理を追加
+            }
+            // type === 'continue' の場合は、通常のループ継続
+          }
+        }
+        
         if (this.isStagnant()) {
           console.log('\n⚠️  Coverage stagnant, stopping iterations...');
           break;
@@ -259,6 +282,95 @@ class Orchestrator {
     if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
     if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
+  }
+
+  /**
+   * 推奨テストを表示
+   * @param {Array} recommendations - 推奨テストリスト
+   */
+  async showRecommendations(recommendations) {
+    if (!recommendations || recommendations.length === 0) {
+      console.log('\n✅ 全ての観点がカバー済みです。');
+      return;
+    }
+
+    console.log('\n🎯 次にやるべきテスト:\n');
+    recommendations.forEach((rec, index) => {
+      console.log(`[${index + 1}] ${rec.title} (${rec.priority})`);
+      console.log(`    理由: ${rec.reason}\n`);
+    });
+    
+    console.log('[0] 終了');
+    console.log('[Enter] 次のイテレーションを続行\n');
+  }
+
+  /**
+   * ユーザー入力を受け付ける
+   * @param {string} prompt - プロンプトメッセージ
+   * @returns {Promise<string>} ユーザー入力
+   */
+  async promptUser(prompt) {
+    // テストモード用のモック入力
+    if (this._mockUserInput !== undefined) {
+      const input = this._mockUserInput;
+      this._mockUserInput = undefined; // 一度使ったらクリア
+      return input;
+    }
+
+    // 実際の入力処理（readline使用）
+    const readline = require('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    return new Promise((resolve) => {
+      rl.question(prompt, (answer) => {
+        rl.close();
+        resolve(answer.trim());
+      });
+    });
+  }
+
+  /**
+   * ユーザーの選択を処理
+   * @param {string} input - ユーザー入力
+   * @param {Array} recommendations - 推奨テストリスト
+   * @returns {Object|null} 選択結果
+   */
+  async handleUserSelection(input, recommendations) {
+    // 0: 終了
+    if (input === '0') {
+      return { type: 'exit' };
+    }
+
+    // Enter: 続行
+    if (input === '' || input === '\n') {
+      return { type: 'continue' };
+    }
+
+    // 番号選択
+    const index = parseInt(input) - 1;
+    if (index >= 0 && index < recommendations.length) {
+      return {
+        type: 'specific',
+        recommendation: recommendations[index]
+      };
+    }
+
+    // 無効な入力
+    return null;
+  }
+
+  /**
+   * 推奨テストを表示してユーザーアクションを待つ
+   * @param {Array} recommendations - 推奨テストリスト
+   * @returns {Promise<Object>} ユーザーアクション
+   */
+  async waitForUserAction(recommendations) {
+    await this.showRecommendations(recommendations);
+    const input = await this.promptUser('番号を選択してください: ');
+    return this.handleUserSelection(input, recommendations);
   }
 }
 

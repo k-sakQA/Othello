@@ -366,6 +366,36 @@ class Analyzer {
       }
     };
   }
+
+  /**
+   * 実行結果とカバレッジデータから推奨テストを生成
+   * @param {Array} executionResults - 実行結果の配列
+   * @param {Object} coverageData - カバレッジデータ
+   * @returns {Promise<Array>} 推奨テストリスト
+   */
+  async generateRecommendations(executionResults, coverageData) {
+    const recommendations = [];
+    
+    // 全て観点がカバー済みの場合は空配列を返す
+    if (!coverageData.uncovered_aspects || coverageData.uncovered_aspects.length === 0) {
+      return recommendations;
+    }
+    
+    // 未カバー観点から推奨テストを生成（最大5件）
+    const maxRecommendations = 5;
+    const uncoveredAspects = coverageData.uncovered_aspects.slice(0, maxRecommendations);
+    
+    for (const aspectId of uncoveredAspects) {
+      recommendations.push({
+        priority: 'High',
+        title: `観点${aspectId}のテスト`,
+        reason: `未カバー観点: 観点${aspectId}`,
+        aspectId: aspectId
+      });
+    }
+    
+    return recommendations;
+  }
 }
 
 module.exports = Analyzer;

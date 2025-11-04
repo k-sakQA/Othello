@@ -235,6 +235,39 @@ class OthelloAnalyzer {
     );
     console.log('===========================\n');
   }
+
+  /**
+   * 推奨テストリストを生成
+   * @param {Object} coverage - 現在のカバレッジ情報
+   * @param {Array} executionResults - 実行結果の配列
+   * @returns {Array} 推奨テストの配列
+   */
+  generateRecommendations(coverage, executionResults = []) {
+    const recommendations = [];
+    
+    // 未カバー観点から推奨を生成
+    const untestedAspects = coverage.aspectCoverage?.untested_aspects || 
+                            coverage.uncovered_aspects || 
+                            [];
+    
+    // 最大5件の推奨を生成
+    const topUntested = untestedAspects.slice(0, 5);
+    
+    topUntested.forEach((aspectNo, index) => {
+      recommendations.push({
+        id: index + 1,
+        priority: index < 2 ? 'High' : 'Medium',
+        title: `観点 ${aspectNo} のテスト`,
+        reason: `未カバー観点 (No.${aspectNo})`,
+        aspectNo: aspectNo
+      });
+    });
+    
+    // 失敗が多い観点を検出（今後の拡張ポイント）
+    // TODO: executionResults から失敗率の高い観点を抽出
+    
+    return recommendations;
+  }
 }
 
 module.exports = OthelloAnalyzer;

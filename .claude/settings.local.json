@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "mcp__playwright-test__planner_setup_page",
-      "mcp__playwright-test__browser_navigate"
+      "mcp__playwright-test__browser_navigate",
+      "Bash(node:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
