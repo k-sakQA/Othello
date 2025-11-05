@@ -1,0 +1,31 @@
+{
+  "default_browser": "chromium",
+  "timeout_seconds": 60,
+  "max_iterations": 10,
+  "screenshot_on_error": true,
+  "paths": {
+    "logs": "./logs",
+    "results": "./results",
+    "test_instructions": "./test-instructions",
+    "reports": "./reports",
+    "screenshots": "./screenshots"
+  },
+  "target_systems": [
+    {
+      "name": "test-system",
+      "url": "https://test.example.com"
+    }
+  ],
+  "playwright_agent": {
+    "vscode_workspace": "/path/to/workspace",
+    "api_endpoint": "http://localhost:8931/mcp"
+  },
+  "claude_api": {
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "coverage_threshold": {
+    "target_percentage": 80
+  }
+}
