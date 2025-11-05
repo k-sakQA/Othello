@@ -12,13 +12,24 @@
   },
   "target_systems": [
     {
-      "name": "test-system",
-      "url": "https://test.example.com"
+      "name": "test-app",
+      "url": "https://example.com",
+      "credentials": {
+        "username_env": "TEST_USERNAME",
+        "password_env": "TEST_PASSWORD"
+      }
     }
   ],
   "playwright_agent": {
-    "vscode_workspace": "/path/to/workspace",
-    "api_endpoint": "http://localhost:8931/mcp"
+    "vscode_workspace": "/test/workspace",
+    "planner_settings": {
+      "max_test_scenarios": 10,
+      "focus_on_edge_cases": true
+    },
+    "healer_settings": {
+      "max_retry_attempts": 3,
+      "auto_heal": true
+    }
   },
   "claude_api": {
     "model": "claude-sonnet-4-20250514",
@@ -26,6 +37,7 @@
     "temperature": 0.7
   },
   "coverage_threshold": {
-    "target_percentage": 80
+    "target_percentage": 80,
+    "stop_if_no_improvement": true
   }
 }
