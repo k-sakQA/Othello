@@ -27,6 +27,7 @@ const Reporter = require('../src/reporter');
 const { LLMFactory } = require('../src/llm/llm-factory');
 const PlaywrightAgent = require('../src/playwright-agent');
 const ConfigManager = require('../src/config');
+const MCPHealthChecker = require('../src/mcp-health-checker');
 
 /**
  * Setup CLI arguments parser
@@ -228,7 +229,7 @@ async function main() {
     const argv = setupCLI();
 
     // 設定の構築
-    let config = {
+    const config = {
       url: argv.url,
       maxIterations: argv['max-iterations'],
       coverageTarget: argv['coverage-target'],
@@ -278,6 +279,27 @@ async function main() {
     
     // 出力ディレクトリの作成
     await fs.mkdir(config.outputDir, { recursive: true });
+    
+    // MCP Health Check（モックモードでない場合のみ）
+    if (config.llmProvider !== 'mock') {
+      const healthChecker = new MCPHealthChecker({
+        timeout: 5000,
+        verbose: config.verbose
+      });
+      
+      const mcpAvailable = await healthChecker.checkAndPrompt({
+        autoCheck: true,
+        showHelp: true,
+        browser: config.browser,
+        shell: 'pwsh' // Windows環境なのでpwsh
+      });
+      
+      if (!mcpAvailable) {
+        console.error('\n❌ Cannot proceed without Playwright MCP Server.');
+        console.error('💡 Tip: You can use --llm-provider mock for testing without MCP.\n');
+        process.exit(1);
+      }
+    }
     
     // LLMの初期化
     console.log(`🤖 Initializing LLM (${config.llmProvider})...`);
@@ -446,61 +468,11 @@ test('Fixed test', async ({ page }) => {
     const executor = new OthelloExecutor({ playwrightMCP: playwrightAgent, config });
     const healer = new OthelloHealer({ llm, config });
     
-    // モックAnalyzer（Phase 9対応）
-    let mockCoverage = 30; // 初期カバレッジ
-    const analyzer = {
-      async analyze(executionResults) {
-        // イテレーションごとにカバレッジを増加
-        mockCoverage = Math.min(100, mockCoverage + Math.random() * 15 + 5);
-        
-        return {
-          aspectCoverage: {
-            percentage: mockCoverage,
-            covered: Math.floor(mockCoverage / 10),
-            total: 10
-          },
-          visitedPages: ['reserve.html', 'confirmation.html'],
-          testedFeatures: ['form_input', 'button_click', 'validation'],
-          timestamp: new Date().toISOString()
-        };
-      },
-      analyzeWithHistory(history) {
-        return {
-          cumulativeCoverage: {
-            percentage: mockCoverage,
-            covered: Math.floor(mockCoverage / 10),
-            total: 10
-          },
-          iterations: history.length
-        };
-      }
-    };
+    // Analyzer（Phase 9対応 - 実際のAnalyzerを使用）
+    const analyzer = new Analyzer(config);
     
-    // モックReporter（Phase 9対応）
-    const reporter = {
-      async saveReport(data, filename) {
-        console.log(`  Report saved: ${filename}`);
-        return { success: true, path: filename };
-      },
-      async generateReport(history) {
-        return {
-          iterations: history.length,
-          coverage: 0,
-          passed: 0,
-          failed: 0
-        };
-      },
-      async saveAllReports(reportData) {
-        console.log('  Generating final reports...');
-        await fs.mkdir(config.outputDir, { recursive: true });
-        
-        const reportPath = path.join(config.outputDir, 'final-report.json');
-        await fs.writeFile(reportPath, JSON.stringify(reportData, null, 2));
-        
-        console.log(`  📊 Final report saved: ${reportPath}`);
-        return { success: true, paths: [reportPath] };
-      }
-    };
+    // Reporter（Phase 9対応 - 実際のReporterを使用）
+    const reporter = new Reporter(config);
     
     // Orchestratorの作成と実行
     const orchestrator = new Orchestrator(config);

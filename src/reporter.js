@@ -43,6 +43,25 @@ class Reporter {
   }
 
   /**
+   * 実行結果からサマリーを生成
+   * @param {Array} results - 実行結果の配列
+   * @param {number} iterations - イテレーション数
+   * @returns {Object} サマリー
+   */
+  createSummaryFromResults(results, iterations) {
+    const totalTests = results.length;
+    const passed = results.filter(r => r.status === 'passed' || r.status === 'success').length;
+    const failed = results.filter(r => r.status === 'failed' || r.status === 'error').length;
+    
+    return {
+      total_iterations: iterations,
+      total_tests: totalTests,
+      passed: passed,
+      failed: failed
+    };
+  }
+
+  /**
    * サマリーデータをフォーマット
    * @param {Object} summary - サマリーデータ
    * @returns {Object} フォーマット済みサマリー
@@ -63,7 +82,7 @@ class Reporter {
       passedTests,
       failedTests,
       successRate: Math.round(successRate * 100) / 100,
-      finalCoverage: summary.final_coverage || 0
+      finalCoverage: summary.final_coverage || summary.coverage || 0
     };
   }
 
@@ -110,8 +129,12 @@ class Reporter {
    * @returns {Promise<string>} HTML文字列
    */
   async generateHTML(data) {
-    const formattedSummary = this.formatSummary(data.summary);
-    const formattedIterations = (data.iterations || []).map(iter => 
+    // summaryがない場合はexecutionResultsから生成
+    const summary = data.summary || this.createSummaryFromResults(data.executionResults || [], data.iterations || 0);
+    const formattedSummary = this.formatSummary(summary);
+    // iterationsが数値の場合は空配列、配列の場合はそのまま使用
+    const iterationsArray = Array.isArray(data.iterations) ? data.iterations : [];
+    const formattedIterations = iterationsArray.map(iter => 
       this.formatIteration(iter)
     );
 
@@ -357,6 +380,95 @@ class Reporter {
 </html>`;
 
     return html;
+  }
+
+  /**
+   * 全フォーマットのレポートを保存（JSON, Markdown, HTML）
+   * @param {Object} reportData - レポートデータ
+   * @param {string} sessionId - セッションID
+   * @returns {Promise<Object>} 保存されたファイルパス
+   */
+  async saveAllReports(reportData, sessionId) {
+    // reportDataのバリデーション
+    if (!reportData) {
+      console.error('[Reporter] reportData is undefined');
+      reportData = {};
+    }
+
+    // ConfigManagerからconfig取得
+    const config = this.config.getConfig ? this.config.getConfig() : this.config;
+    const outputDir = config.paths?.reports || config.outputDir || './reports';
+    await fs.mkdir(outputDir, { recursive: true });
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const baseName = `othello-report-${sessionId || timestamp}`;
+    
+    // JSON形式で保存
+    const jsonPath = path.join(outputDir, `${baseName}.json`);
+    await fs.writeFile(jsonPath, JSON.stringify(reportData, null, 2), 'utf8');
+    
+    // Markdown形式で保存
+    const mdPath = path.join(outputDir, `${baseName}.md`);
+    const markdown = this.generateMarkdown(reportData);
+    await fs.writeFile(mdPath, markdown, 'utf8');
+    
+    // HTML形式で保存
+    const htmlPath = path.join(outputDir, `${baseName}.html`);
+    const html = await this.generateHTML(reportData);
+    await fs.writeFile(htmlPath, html, 'utf8');
+    
+    return {
+      json: jsonPath,
+      markdown: mdPath,
+      html: htmlPath
+    };
+  }
+
+  /**
+   * Markdown形式のレポートを生成
+   * @param {Object} reportData - レポートデータ
+   * @returns {string} Markdown形式のレポート
+   */
+  generateMarkdown(reportData) {
+    // デフォルト値でフォールバック
+    const { 
+      sessionId = 'unknown', 
+      startTime = Date.now(), 
+      endTime = Date.now(), 
+      totalDuration = 0, 
+      iterations = 0, 
+      coverage = {}, 
+      executionResults = [] 
+    } = reportData || {};
+    
+    let md = `# Othello Test Report\n\n`;
+    md += `**Session ID:** ${sessionId}\n`;
+    md += `**Start Time:** ${new Date(startTime).toLocaleString()}\n`;
+    md += `**End Time:** ${new Date(endTime).toLocaleString()}\n`;
+    md += `**Duration:** ${Math.round(totalDuration / 1000)}s\n\n`;
+    
+    md += `## Summary\n\n`;
+    md += `**Iterations:** ${iterations}\n\n`;
+    md += `**Coverage:** ${coverage?.percentage?.toFixed(2) || 0}% (${coverage?.covered || 0}/${coverage?.total || 0} aspects)\n\n`;
+    md += `**Tests Passed:** ${executionResults.filter(r => r.success || r.status === 'passed').length}\n\n`;
+    md += `**Tests Failed:** ${executionResults.filter(r => !r.success && r.status !== 'passed').length}\n\n`;
+    md += `**Auto-Healed:** ${executionResults.filter(r => r.autoHealed || r.healed).length}\n\n`;
+    
+    md += `## Test Results\n\n`;
+    executionResults.forEach((result, index) => {
+      const status = (result.success || result.status === 'passed') ? '✅' : '❌';
+      md += `### ${index + 1}. ${result.testCaseId || result.test_case_id || `Test-${index + 1}`} ${status}\n\n`;
+      md += `**Aspect:** ${result.aspectNo || result.aspect_no || 'N/A'}\n\n`;
+      md += `**Duration:** ${result.durationMs || result.duration_ms || 0}ms\n\n`;
+      if (result.autoHealed || result.healed) {
+        md += `**Auto-Healed:** Yes${result.healMethod || result.heal_method ? ` (${result.healMethod || result.heal_method})` : ''}\n\n`;
+      }
+      if (result.error) {
+        md += `**Error:** ${result.error}\n\n`;
+      }
+    });
+    
+    return md;
   }
 }
 
