@@ -38,6 +38,8 @@
 - ✅ プログラマティックに完全自動化
 - ✅ テスト観点リストに基づく体系的アプローチ
 - ✅ LLM活用による高度な分析・生成
+- ✅ 対話モード: AI推奨テストから選択可能
+- ✅ より深いテスト生成: 100%カバー後もエッジケース・組み合わせテストを提案
 
 ### 1.3 背景
 - 手動でのE2Eテスト実行には時間がかかる
@@ -82,6 +84,7 @@ npx othello --url <対象URL>
 | `--config` | 設定ファイルのパス | × | ./config/default.json |
 | `--test-aspects-csv` | テスト観点リストCSVのパス | × | ./config/test-ViewpointList.csv |
 | `--auto-heal` | 失敗テスト自動修復モード | × | true |
+| `--interactive` | 対話モード（推奨テストを選択） | × | false |
 | `--llm-provider` | LLMプロバイダ（claude/openai/mock） | × | claude |
 
 #### 2.1.3 実行例
@@ -517,6 +520,152 @@ npx othello --url https://example.com --auto-heal --max-iterations 20
 1. **観点カバレッジが目標値に達した**（デフォルト80%）
 2. **最大イテレーション数に達した**（デフォルト10回）
 3. **3回連続でカバレッジが向上しなかった**（停滞判定）
+4. **ユーザーが終了を選択した**（対話モード有効時）
+
+---
+
+### 2.10 対話モード機能（NEW! Phase 9.1）
+**優先度**: 高
+
+#### 2.10.1 概要
+各イテレーション完了後、ユーザーにAI推奨テストを提示し、選択させる機能。
+
+#### 2.10.2 有効化
+```bash
+# CLIオプション
+npx othello --url https://example.com --interactive
+
+# プログラマティック
+const orchestrator = new Orchestrator({
+  url: 'https://example.com',
+  interactive: true
+});
+```
+
+#### 2.10.3 推奨テストの種類と優先順位
+
+**1. 失敗したテスト（最優先）**
+- 前回実行で失敗したテストを最初に表示
+- ラベル: `[失敗したテスト] 観点Xのテスト (High)`
+- 理由: 修復が必要、カバレッジ向上に必須
+
+**2. 未カバー観点のテスト（高優先）**
+- まだテストされていない23観点から推奨
+- ラベル: `観点Xのテスト (High/Medium)`
+- 理由: カバレッジ向上に直接貢献
+
+**3. より深いテスト（100%カバー後のみ）**
+- AIがエッジケース、組み合わせテスト、非機能テストを生成
+- ラベル: `より深いテスト（エッジケース、組み合わせテスト）を生成 (Medium)`
+- 理由: 全観点がカバー済み。さらなるテスト品質向上のため
+- 実装: `Planner.generateDeeperTests(history, url)`
+
+**4. テスト完了（100%カバー後のみ）**
+- すべての観点がカバー済みの場合に表示
+- ラベル: `テスト完了（終了） (Low)`
+- 理由: 全観点がカバー済み。テストを完了します
+
+#### 2.10.4 ユーザー選択肢
+```
+🎯 次にやるべきテスト:
+[1] 失敗したテスト: 観点5のテスト (High)
+    理由: 前回実行で失敗。修復が必要です
+[2] 観点3のテスト (High)
+    理由: 未カバー観点 (No.3)
+[3] より深いテスト（エッジケース、組み合わせテスト）を生成 (Medium)
+    理由: 全観点がカバー済み。さらなるテスト品質向上のため
+[4] テスト完了（終了） (Low)
+    理由: 全観点がカバー済み。テストを完了します
+[0] 終了
+[Enter] 次のイテレーションを続行
+
+番号を選択してください: 
+```
+
+#### 2.10.5 選択時の動作
+
+| 選択 | 動作 |
+|------|------|
+| **数字（1-N）** | 選択したテストを実行（Planner→Generator→Executor→Healer→Analyzer） |
+| **[0]** | 即座にテスト終了 |
+| **[Enter]** | 通常のイテレーションを継続（自動選択） |
+
+#### 2.10.6 より深いテスト生成の仕様
+
+**入力**:
+- 実行履歴（history）: 過去のテスト結果、成功/失敗情報
+- 対象URL
+
+**処理**:
+```javascript
+// Planner.generateDeeperTests メソッド
+async generateDeeperTests({ history, url }) {
+  // 1. 実行履歴を分析
+  const testedAspects = extractTestedAspects(history);
+  const successfulTests = extractSuccessfulTests(history);
+  
+  // 2. LLMにプロンプト送信
+  const prompt = `
+    既存のテスト実行状況:
+    - テスト済み観点数: ${testedAspects.size}
+    - 成功したテスト数: ${successfulTests.length}
+    
+    より深いテストケースを3つ生成してください：
+    1. エッジケース: 境界値、極端な入力値
+    2. 組み合わせテスト: 複数機能の組み合わせ
+    3. 非機能テスト: パフォーマンス、セキュリティ
+  `;
+  
+  // 3. LLMレスポンスをパース
+  const testCases = parseLLMResponse(response);
+  
+  return {
+    testCases: [
+      {
+        test_case_id: 'DEEPER-001',
+        aspect_no: 9001,
+        title: 'エッジケース: 空文字入力',
+        test_type: 'エッジケース',
+        steps: [...],
+        expected_results: [...]
+      },
+      ...
+    ]
+  };
+}
+```
+
+**出力**:
+- エッジケーステスト（境界値、極端な入力）
+- 組み合わせテスト（複数機能の連続操作）
+- 非機能テスト（パフォーマンス、セキュリティ）
+
+**フォールバック**:
+LLMエラー時は、デフォルトのエッジケーステスト（空文字入力テスト）を返す。
+
+#### 2.10.7 実装コンポーネント
+
+**Analyzer.generateRecommendations()**
+- 失敗テストを抽出（Map<aspectId, latestFailure>）
+- 未カバー観点を抽出
+- 100%カバー時に 'deeper' と 'complete' タイプを追加
+
+**Orchestrator.waitForUserAction()**
+- 推奨テストを表示
+- ユーザー入力を受け付け
+- 選択結果を返す
+
+**Orchestrator.executeSpecificTest()**
+- 選択されたテストを全エージェント経由で実行
+
+**Orchestrator.executeDeeperTests()**
+- Planner.generateDeeperTests() を呼び出し
+- Generator→Executor→Analyzer で実行
+- 履歴に deeperTest: true フラグを追加
+
+**Orchestrator.handleCompleteOption()**
+- 完了メッセージを表示
+- { shouldExit: true } を返してループ終了
 
 ---
 
