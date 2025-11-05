@@ -111,7 +111,7 @@ describe('Analyzer - generateRecommendations', () => {
       });
     });
 
-    test('全て観点がカバー済みの場合、空の配列を返す', async () => {
+    test('全て観点がカバー済みの場合、より深いテストを提案', async () => {
       const executionResults = [
         { test_name: 'Test 1', aspect_no: 1, success: true },
         { test_name: 'Test 2', aspect_no: 2, success: true },
@@ -138,7 +138,10 @@ describe('Analyzer - generateRecommendations', () => {
         coverageData
       );
 
-      expect(recommendations).toEqual([]);
+      // 100%カバー時は「より深いテスト」と「完了」オプションを提案
+      expect(recommendations).toHaveLength(2);
+      expect(recommendations[0].type).toBe('deeper');
+      expect(recommendations[1].type).toBe('complete');
     });
   });
 
@@ -192,6 +195,65 @@ describe('Analyzer - generateRecommendations', () => {
       );
 
       expect(recommendations.length).toBeLessThanOrEqual(5);
+    });
+  });
+
+  describe('失敗したテストを推奨リストに含める', () => {
+    test('失敗したテストが推奨リストの先頭に表示される', async () => {
+      const executionResults = [
+        { test_case_id: 'TC001', aspect_no: 1, success: true },
+        { test_case_id: 'TC002', aspect_no: 2, success: false, error: { message: 'Element not found' } },
+        { test_case_id: 'TC003', aspect_no: 3, success: false, error: { message: 'Timeout' } }
+      ];
+
+      const coverageData = {
+        percentage: 10,
+        covered: 1,
+        total: 10,
+        covered_aspects: [1],
+        uncovered_aspects: [4, 5, 6, 7, 8, 9, 10]
+      };
+
+      const recommendations = await analyzer.generateRecommendations(
+        executionResults,
+        coverageData
+      );
+
+      // 失敗したテストが先頭に来る
+      expect(recommendations.length).toBeGreaterThan(0);
+      expect(recommendations[0].title).toContain('失敗したテスト');
+      expect(recommendations[0].type).toBe('failed');
+      expect(recommendations[0].aspectId).toBe(2);
+    });
+
+    test('失敗したテストに必要な情報が含まれる', async () => {
+      const executionResults = [
+        { 
+          test_case_id: 'TC005', 
+          aspect_no: 5, 
+          success: false, 
+          error: { message: 'Element not found', instruction_index: 2 } 
+        }
+      ];
+
+      const coverageData = {
+        percentage: 0,
+        covered: 0,
+        total: 10,
+        covered_aspects: [],
+        uncovered_aspects: [1, 2, 3, 4, 6, 7, 8, 9, 10]
+      };
+
+      const recommendations = await analyzer.generateRecommendations(
+        executionResults,
+        coverageData
+      );
+
+      const failedRec = recommendations.find(r => r.type === 'failed');
+      expect(failedRec).toBeDefined();
+      expect(failedRec.originalTestCaseId).toBe('TC005');
+      expect(failedRec.error).toBeDefined();
+      expect(failedRec.error.message).toBe('Element not found');
     });
   });
 });

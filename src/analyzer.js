@@ -375,22 +375,70 @@ class Analyzer {
    */
   async generateRecommendations(executionResults, coverageData) {
     const recommendations = [];
+    const maxRecommendations = 5;
     
-    // 全て観点がカバー済みの場合は空配列を返す
-    if (!coverageData.uncovered_aspects || coverageData.uncovered_aspects.length === 0) {
-      return recommendations;
+    // 1. 失敗したテストを抽出（重複する観点は最新のもののみ）
+    const failedTests = new Map(); // aspectId -> 最新の失敗テスト
+    
+    if (executionResults && Array.isArray(executionResults)) {
+      for (const result of executionResults) {
+        if (!result.success && result.aspect_no) {
+          // 同じ観点の失敗は最新のもので上書き
+          failedTests.set(result.aspect_no, result);
+        }
+      }
     }
     
-    // 未カバー観点から推奨テストを生成（最大5件）
-    const maxRecommendations = 5;
-    const uncoveredAspects = coverageData.uncovered_aspects.slice(0, maxRecommendations);
-    
-    for (const aspectId of uncoveredAspects) {
+    // 失敗したテストを推奨リストに追加
+    for (const [aspectId, failedTest] of failedTests) {
       recommendations.push({
+        type: 'failed',
         priority: 'High',
-        title: `観点${aspectId}のテスト`,
-        reason: `未カバー観点: 観点${aspectId}`,
-        aspectId: aspectId
+        title: `失敗したテスト: 観点${aspectId}`,
+        reason: `前回実行で失敗: ${failedTest.error?.message || 'エラー'}`,
+        aspectId: aspectId,
+        originalTestCaseId: failedTest.test_case_id,
+        error: failedTest.error
+      });
+    }
+    
+    // 2. 未カバー観点から推奨を生成（失敗テストと合わせて最大5件まで）
+    const remainingSlots = maxRecommendations - recommendations.length;
+    
+    if (remainingSlots > 0 && coverageData.uncovered_aspects && coverageData.uncovered_aspects.length > 0) {
+      const uncoveredAspects = coverageData.uncovered_aspects.slice(0, remainingSlots);
+      
+      for (const aspectId of uncoveredAspects) {
+        recommendations.push({
+          type: 'uncovered',
+          priority: 'High',
+          title: `観点${aspectId}のテスト`,
+          reason: `未カバー観点: 観点${aspectId}`,
+          aspectId: aspectId
+        });
+      }
+    }
+    
+    // 3. 全観点がカバー済みで失敗もない場合、より深いテストを提案
+    const allCovered = !coverageData.uncovered_aspects || coverageData.uncovered_aspects.length === 0;
+    const noFailures = failedTests.size === 0;
+    
+    if (allCovered && noFailures && coverageData.percentage === 100) {
+      // より深いテストを生成するオプション
+      recommendations.push({
+        type: 'deeper',
+        priority: 'Medium',
+        title: 'より深いテスト（エッジケース、組み合わせテスト）を生成',
+        reason: '全観点がカバー済み。さらなるテスト品質向上のため',
+        requiresAI: true
+      });
+      
+      // テスト完了オプション
+      recommendations.push({
+        type: 'complete',
+        priority: 'Low',
+        title: 'テスト完了（終了）',
+        reason: '全観点がカバー済み。テストを完了します'
       });
     }
     

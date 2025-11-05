@@ -67,8 +67,8 @@ class Orchestrator {
               console.log('\n👋 ユーザーによる終了');
               break;
             } else if (userAction.type === 'specific') {
-              console.log(`\n▶️  選択されたテスト: ${userAction.recommendation.title}`);
-              // TODO: 特定のテストを実行する処理を追加
+              // 選択されたテストを実行
+              await this.executeSpecificTest(userAction.recommendation);
             }
             // type === 'continue' の場合は、通常のループ継続
           }
@@ -371,6 +371,220 @@ class Orchestrator {
     await this.showRecommendations(recommendations);
     const input = await this.promptUser('番号を選択してください: ');
     return this.handleUserSelection(input, recommendations);
+  }
+
+  /**
+   * 選択された推奨テストを全エージェント経由で実行
+   * @param {Object} recommendation - 推奨テスト
+   * @returns {Promise<Object>} 実行結果
+   */
+  async executeSpecificTest(recommendation) {
+    console.log(`\n🎯 実行中: ${recommendation.title}`);
+    
+    const iterationResults = {
+      iteration: this.iteration,
+      testCases: [],
+      executionResults: [],
+      coverage: null,
+      specificTest: true,
+      targetAspectId: recommendation.aspectId
+    };
+
+    try {
+      // 1. Planner: 特定の観点に絞ったテスト計画を生成
+      const currentCoverage = await this.getCurrentCoverage();
+      const plannerOptions = {
+        url: this.config.url,
+        testAspectsCSV: this.config.testAspectsCSV,
+        existingCoverage: currentCoverage,
+        targetAspectId: recommendation.aspectId
+      };
+      
+      // 失敗したテストの場合は、失敗情報をPlannerに渡す
+      if (recommendation.type === 'failed') {
+        plannerOptions.failedTest = {
+          testCaseId: recommendation.originalTestCaseId,
+          error: recommendation.error,
+          aspectId: recommendation.aspectId
+        };
+        console.log(`   📝 前回の失敗情報をPlannerに渡して修復を試みます`);
+      }
+      
+      const testPlan = await this.planner.generateTestPlan(plannerOptions);
+      iterationResults.testCases = testPlan.testCases;
+
+      // 2. Generator: テストコードを生成
+      const snapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
+      const generatedTests = await this.generator.generate({
+        testCases: testPlan.testCases,
+        snapshot,
+        url: this.config.url
+      });
+
+      // 3. Executor: テストを実行（+ Healer: 必要に応じて修復）
+      for (const testCase of generatedTests) {
+        const result = await this.executor.execute(testCase);
+        iterationResults.executionResults.push({
+          test_case_id: testCase.test_case_id,
+          aspect_no: testCase.aspect_no,
+          success: result.success,
+          duration_ms: result.duration_ms,
+          error: result.error
+        });
+
+        // 失敗時の自動修復
+        if (!result.success && this.config.autoHeal) {
+          console.log(`\n🔧 Auto-healing test case: ${testCase.test_case_id}`);
+
+          // Stage 1: Quick retry with wait
+          const failedIndex = result.error?.instruction_index || 0;
+          const quickFixed = JSON.parse(JSON.stringify(testCase.instructions));
+          quickFixed.splice(failedIndex, 0, {
+            type: 'wait',
+            duration: 500,
+            description: 'Auto-inserted wait for UI stability'
+          });
+
+          const quickResult = await this.executor.execute({
+            ...testCase,
+            instructions: quickFixed
+          });
+
+          if (quickResult.success) {
+            console.log(`   ✅ Quick fix succeeded (500ms wait)`);
+            testCase.instructions = quickFixed;
+            const lastResult = iterationResults.executionResults[iterationResults.executionResults.length - 1];
+            lastResult.success = true;
+            lastResult.healed = true;
+            lastResult.heal_method = 'quick_wait';
+          } else {
+            // Stage 2: LLM-based Healer
+            const currentSnapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
+
+            const healResult = await this.healer.heal({
+              test_case_id: testCase.test_case_id,
+              instructions: testCase.instructions,
+              error: result.error,
+              snapshot: currentSnapshot
+            });
+
+            if (healResult.success && healResult.fixed_instructions) {
+              console.log(`   🔧 Healer: ${healResult.root_cause}`);
+              testCase.instructions = healResult.fixed_instructions;
+
+              const healerRetryResult = await this.executor.execute(testCase);
+
+              if (healerRetryResult.success) {
+                const lastResult = iterationResults.executionResults[iterationResults.executionResults.length - 1];
+                lastResult.success = true;
+                lastResult.healed = true;
+                lastResult.heal_method = 'llm_analysis';
+                lastResult.root_cause = healResult.root_cause;
+                console.log(`   ✅ Auto-healed successfully!`);
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Analyzer: カバレッジを分析
+      const coverage = await this.analyzer.analyze(iterationResults.executionResults);
+      iterationResults.coverage = coverage;
+
+      // 5. 履歴に追加
+      this.history.push(iterationResults);
+
+      // 成功判定
+      const success = iterationResults.executionResults.every(r => r.success);
+      
+      console.log(success ? '\n✅ テスト実行成功' : '\n❌ テスト実行失敗');
+
+      return {
+        success,
+        testCases: iterationResults.testCases,
+        executionResults: iterationResults.executionResults,
+        coverage
+      };
+    } catch (error) {
+      console.error(`特定テスト実行失敗: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * より深いテストを実行
+   * @param {Object} recommendation - 推奨テスト情報（type='deeper'）
+   * @returns {Promise<Object>} 実行結果
+   */
+  async executeDeeperTests(recommendation) {
+    console.log(`\n🧠 より深いテストを生成中...`);
+    
+    try {
+      const iterationResults = {
+        iteration: this.history.length + 1,
+        testCases: [],
+        executionResults: [],
+        coverage: null,
+        deeperTest: true // フラグを追加
+      };
+
+      // 1. Planner: 実行履歴を元にAIで深いテストを生成
+      const deeperTestPlan = await this.planner.generateDeeperTests({
+        history: this.history,
+        url: this.config.url
+      });
+      iterationResults.testCases = deeperTestPlan.testCases;
+
+      // 2. Generator: テストコードを生成
+      const snapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
+      const generatedTests = await this.generator.generate({
+        testCases: deeperTestPlan.testCases,
+        snapshot,
+        url: this.config.url
+      });
+
+      // 3. Executor: テストを実行
+      for (const testCase of generatedTests) {
+        const result = await this.executor.execute(testCase);
+        iterationResults.executionResults.push({
+          test_case_id: testCase.test_case_id,
+          aspect_no: testCase.aspect_no,
+          success: result.success,
+          duration_ms: result.duration_ms,
+          error: result.error
+        });
+      }
+
+      // 4. Analyzer: カバレッジを分析
+      const coverage = await this.analyzer.analyze(iterationResults.executionResults);
+      iterationResults.coverage = coverage;
+
+      // 5. 履歴に追加
+      this.history.push(iterationResults);
+
+      const success = iterationResults.executionResults.every(r => r.success);
+      console.log(success ? '\n✅ より深いテスト実行成功' : '\n❌ より深いテスト実行失敗');
+
+      return {
+        success,
+        testCases: iterationResults.testCases,
+        executionResults: iterationResults.executionResults,
+        coverage
+      };
+    } catch (error) {
+      console.error(`より深いテスト実行失敗: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 完了オプションを処理
+   * @param {Object} recommendation - 推奨テスト情報（type='complete'）
+   * @returns {Promise<Object>} 処理結果
+   */
+  async handleCompleteOption(recommendation) {
+    console.log('\n✅ テスト完了！すべての観点がカバーされました。');
+    return { shouldExit: true };
   }
 }
 
