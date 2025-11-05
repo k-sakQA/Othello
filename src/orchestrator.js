@@ -70,6 +70,7 @@ class Orchestrator {
             
             if (userAction.type === 'exit') {
               console.log('\n👋 ユーザーによる終了');
+              continueLoop = false; // ループを終了してレポート生成へ
               break;
             } else if (userAction.type === 'specific') {
               // 選択されたテストを実行（イテレーションカウントは増やさない）
