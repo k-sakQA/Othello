@@ -31,7 +31,9 @@ class InstructionGenerator {
     }
 
     // 初回実行時や未カバー領域がない場合は、基本的な探索的テストを生成
-    if (testInstructions.length === 0) {
+    // ただし、カバレッジが100%の場合（全て完了している場合）は生成しない
+    const isFullCoverage = coverageData.coverage && coverageData.coverage.percentage === 100;
+    if (testInstructions.length === 0 && !isFullCoverage) {
       testInstructions.push({
         priority: 'high',
         target: 'Initial Exploration',
