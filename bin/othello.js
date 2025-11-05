@@ -54,6 +54,12 @@ const argv = yargs(hideBin(process.argv))
     description: 'Enable automatic test healing',
     default: true
   })
+  .option('interactive', {
+    alias: 'i',
+    type: 'boolean',
+    description: 'Enable interactive mode (AI recommendations)',
+    default: false
+  })
   .option('output-dir', {
     alias: 'o',
     type: 'string',
@@ -138,11 +144,12 @@ async function main() {
     console.log('==========================================\n');
     
     // 設定の構築
-    let config = {
+    const config = {
       url: argv.url,
       maxIterations: argv['max-iterations'],
       coverageTarget: argv['coverage-target'],
       autoHeal: argv['auto-heal'],
+      interactive: argv.interactive,
       outputDir: argv['output-dir'],
       testAspectsCsv: argv['test-aspects-csv'],
       browser: argv.browser,
