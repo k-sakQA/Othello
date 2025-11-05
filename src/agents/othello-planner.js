@@ -301,6 +301,123 @@ JSON配列で出力してください：
     
     return md;
   }
+
+  /**
+   * より深いテストケースを生成（AI活用）
+   * @param {Object} options - 生成オプション
+   * @param {Array} options.history - 実行履歴
+   * @param {string} options.url - テスト対象URL
+   * @returns {Promise<Object>} テスト計画
+   */
+  async generateDeeperTests({ history, url }) {
+    console.log('🧠 AIで深いテストケースを分析中...');
+    
+    // 実行履歴からテスト済み観点を抽出
+    const testedAspects = new Set();
+    const successfulTests = [];
+    const failedTests = [];
+    
+    for (const iteration of history) {
+      for (const result of iteration.executionResults || []) {
+        testedAspects.add(result.aspect_no);
+        if (result.success) {
+          successfulTests.push(result);
+        } else {
+          failedTests.push(result);
+        }
+      }
+    }
+
+    // LLMにプロンプトを送信
+    const prompt = `あなたは高度なテスト設計の専門家です。
+
+以下のWebアプリケーションに対して、既存のテストではカバーできていない「より深い」テストケースを生成してください。
+
+## テスト対象
+URL: ${url}
+
+## 既存のテスト実行状況
+- テスト済み観点数: ${testedAspects.size}
+- 成功したテスト数: ${successfulTests.length}
+- 失敗したテスト数: ${failedTests.length}
+
+## より深いテストの観点
+以下のような高度なテストケースを3つ生成してください：
+1. **エッジケース**: 境界値、極端な入力値のテスト
+2. **組み合わせテスト**: 複数機能の組み合わせ、連続操作のテスト
+3. **非機能テスト**: パフォーマンス、セキュリティ、アクセシビリティ
+
+## 出力形式
+以下のJSON形式で出力してください：
+
+\`\`\`json
+{
+  "test_cases": [
+    {
+      "test_case_id": "DEEPER-001",
+      "aspect_no": 9001,
+      "title": "テストケースのタイトル",
+      "description": "テストの目的と狙い",
+      "test_type": "エッジケース/組み合わせテスト/非機能テスト",
+      "priority": "P1/P2/P3",
+      "steps": ["手順1", "手順2", "..."],
+      "expected_results": ["期待結果1", "期待結果2", "..."]
+    }
+  ]
+}
+\`\`\``;
+
+    try {
+      const response = await this.llm.chat([
+        { role: 'system', content: 'あなたは高度なテスト設計の専門家です。JSON形式で回答してください。' },
+        { role: 'user', content: prompt }
+      ]);
+
+      // JSONを抽出
+      const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/) || response.match(/```\n([\s\S]*?)\n```/);
+      const jsonString = jsonMatch ? jsonMatch[1] : response;
+      const result = JSON.parse(jsonString);
+
+      return {
+        testCases: result.test_cases || [],
+        metadata: {
+          generated_at: new Date().toISOString(),
+          type: 'deeper_tests',
+          based_on_history: history.length
+        }
+      };
+    } catch (error) {
+      console.error('❌ より深いテスト生成エラー:', error.message);
+      
+      // フォールバック: シンプルなエッジケーステストを返す
+      return {
+        testCases: [
+          {
+            test_case_id: 'DEEPER-FALLBACK-001',
+            aspect_no: 9001,
+            title: 'エッジケース: 空文字入力',
+            description: '全ての入力フィールドに空文字を入力した場合の挙動を確認',
+            test_type: 'エッジケース',
+            priority: 'P2',
+            steps: [
+              'テスト対象ページにアクセス',
+              '全ての必須入力フィールドを空のままにする',
+              '送信ボタンをクリック'
+            ],
+            expected_results: [
+              '適切なエラーメッセージが表示される',
+              'フォームが送信されない'
+            ]
+          }
+        ],
+        metadata: {
+          generated_at: new Date().toISOString(),
+          type: 'deeper_tests_fallback',
+          error: error.message
+        }
+      };
+    }
+  }
 }
 
 module.exports = OthelloPlanner;

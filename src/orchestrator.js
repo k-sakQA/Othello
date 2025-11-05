@@ -69,6 +69,15 @@ class Orchestrator {
             } else if (userAction.type === 'specific') {
               // 選択されたテストを実行
               await this.executeSpecificTest(userAction.recommendation);
+            } else if (userAction.type === 'deeper') {
+              // より深いテストを生成・実行
+              await this.executeDeeperTests(userAction.recommendation);
+            } else if (userAction.type === 'complete') {
+              // 完了オプション選択
+              const completeResult = await this.handleCompleteOption(userAction.recommendation);
+              if (completeResult.shouldExit) {
+                break;
+              }
             }
             // type === 'continue' の場合は、通常のループ継続
           }
@@ -352,9 +361,25 @@ class Orchestrator {
     // 番号選択
     const index = parseInt(input) - 1;
     if (index >= 0 && index < recommendations.length) {
+      const recommendation = recommendations[index];
+      
+      // より深いテスト or 完了オプションの場合、typeをそのまま返す
+      if (recommendation.type === 'deeper') {
+        return {
+          type: 'deeper',
+          recommendation
+        };
+      } else if (recommendation.type === 'complete') {
+        return {
+          type: 'complete',
+          recommendation
+        };
+      }
+      
+      // 通常の推奨テスト（failed, uncovered）
       return {
         type: 'specific',
-        recommendation: recommendations[index]
+        recommendation
       };
     }
 
