@@ -164,9 +164,12 @@ othello --url https://example.com --no-auto-heal
 othello --help
 ```
 
-### 🗣️ 対話モード
+### 🗣️ 対話モード（Interactive Mode）
 
-`--interactive` フラグを有効にすると、各イテレーション後にAI推奨テストが表示されます：
+`--interactive` フラグを有効にすると、各イテレーション後にAI推奨テストが表示されます。
+
+**重要:** 対話モードでは `--max-iterations` の制限を超えてテストを継続できます！  
+例: `--max-iterations 1` でも、対話的に複数のテストを選択・実行可能です。
 
 ```
 🎯 次にやるべきテスト:
@@ -461,6 +464,62 @@ Othello Phase 9では、実行前にPlaywright MCPサーバーの起動状態を
 ```bash
 # テスト目的でMCP不要の場合
 node bin/othello.js --url https://example.com --llm-provider mock
+```
+
+### 🎯 対話モードの活用例
+
+**シナリオ1: クイックテスト（iterations=1 + 対話モード）**
+
+```bash
+# 最初は1イテレーションだけ実行し、その後対話的に選択
+node bin/othello.js \
+  --url "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0" \
+  --max-iterations 1 \
+  --llm-provider openai \
+  --interactive
+
+# 実行フロー:
+# 1. イテレーション1が自動実行（基本テスト）
+# 2. 推奨テストが表示される
+#    [1] 未カバー観点のテスト
+#    [2] より深いテストを生成
+# 3. ユーザーが選択 → 追加テスト実行
+# 4. 再度推奨テストが表示される（継続可能）
+```
+
+**シナリオ2: 段階的なカバレッジ向上**
+
+```bash
+# 基本的なイテレーションを実行後、対話的に改善
+node bin/othello.js \
+  --url "https://example.com" \
+  --max-iterations 3 \
+  --coverage-target 80 \
+  --interactive \
+  --llm-provider openai
+
+# 実行フロー:
+# 1-3. 通常イテレーション3回実行
+# 4. カバレッジ確認 → 80%未達の場合、推奨テスト表示
+# 5. ユーザーが未カバー観点を選択 → 実行
+# 6. 目標達成まで継続
+```
+
+**シナリオ3: エッジケーステストの追加**
+
+```bash
+# カバレッジ100%達成後、より深いテストを追加
+node bin/othello.js \
+  --url "https://example.com" \
+  --max-iterations 5 \
+  --coverage-target 100 \
+  --interactive
+
+# 実行フロー:
+# 1-5. 100%カバレッジ達成
+# 6. 推奨テストに「より深いテスト」が表示される
+# 7. 選択 → AIがエッジケース・境界値テストを生成
+# 8. テスト品質向上！
 ```
 
 ### サイト探索モード（仕様書なし）
