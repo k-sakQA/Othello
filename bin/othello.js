@@ -27,6 +27,7 @@ const Reporter = require('../src/reporter');
 const { LLMFactory } = require('../src/llm/llm-factory');
 const PlaywrightAgent = require('../src/playwright-agent');
 const ConfigManager = require('../src/config');
+const MCPHealthChecker = require('../src/mcp-health-checker');
 
 // コマンドライン引数の定義
 const argv = yargs(hideBin(process.argv))
@@ -195,6 +196,27 @@ async function main() {
     
     // 出力ディレクトリの作成
     await fs.mkdir(config.outputDir, { recursive: true });
+    
+    // MCP Health Check（モックモードでない場合のみ）
+    if (config.llmProvider !== 'mock') {
+      const healthChecker = new MCPHealthChecker({
+        timeout: 5000,
+        verbose: config.verbose
+      });
+      
+      const mcpAvailable = await healthChecker.checkAndPrompt({
+        autoCheck: true,
+        showHelp: true,
+        browser: config.browser,
+        shell: 'pwsh' // Windows環境なのでpwsh
+      });
+      
+      if (!mcpAvailable) {
+        console.error('\n❌ Cannot proceed without Playwright MCP Server.');
+        console.error('💡 Tip: You can use --llm-provider mock for testing without MCP.\n');
+        process.exit(1);
+      }
+    }
     
     // LLMの初期化
     console.log(`🤖 Initializing LLM (${config.llmProvider})...`);

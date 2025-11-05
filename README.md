@@ -397,7 +397,7 @@ spec/
 
 ## 💡 使用例
 
-### 仕様書ベースのテスト実行（完全版）
+### 🚀 クイックスタート
 
 ```bash
 # Step 1: プロジェクトセットアップ
@@ -408,31 +408,59 @@ npm install
 # Step 2: 環境設定
 cp .env.example .env
 # .envにOpenAI API Keyを設定
+# OPENAI_API_KEY=sk-proj-your-key-here
 
-# Step 3: 仕様書を配置
-mkdir spec
-cat > spec/hotel-reservation-spec.md << 'EOF'
-# ホテル予約システム 仕様書
-
-## 1. 概要
-ユーザーがオンラインでホテルの宿泊プランを予約できるWebアプリケーション
-
-## 2. 機能仕様
-### 2.1 予約入力画面
-- URL: https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0
-- 入力項目: 宿泊日、宿泊数、人数、氏名（必須）
-- バリデーション: 必須項目未入力時にエラーメッセージ表示
-EOF
+# Step 3: MCPサーバー起動チェック
+# Othelloが自動的にチェックし、必要に応じて起動方法を提示します
+# 別ターミナルでMCPサーバーを起動する必要がある場合:
+npx @playwright/mcp@latest --browser chromium
 
 # Step 4: Othello実行
 node bin/othello.js \
   --url "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0" \
   --max-iterations 5 \
-  --coverage-target 90
+  --coverage-target 90 \
+  --llm-provider openai \
+  --verbose
 
 # Step 5: レポート確認
 cat reports/final-report.json
+# Windowsの場合:
+start reports/othello-report-*.html
+# Mac/Linuxの場合:
 open reports/othello-report-*.html
+```
+
+### 📋 MCP Health Check（自動チェック機能）
+
+Othello Phase 9では、実行前にPlaywright MCPサーバーの起動状態を自動チェックします：
+
+```bash
+# 実行時の出力例:
+# 🔍 Checking Playwright MCP Server availability...
+# 
+# ✅ Playwright MCP Server is available
+# 
+# または
+# 
+# ⚠️  Playwright MCP Server is not responding
+# ╔════════════════════════════════════════════════════════════════════════════╗
+# ║                   Playwright MCP Server Not Available                      ║
+# ╚════════════════════════════════════════════════════════════════════════════╝
+# 
+# Othello requires Playwright MCP Server to be running.
+# 
+# 📋 Setup Instructions:
+# 
+# 1️⃣  別のターミナルを開いて、以下のコマンドを実行してください：
+#    npx @playwright/mcp@latest --browser chromium
+```
+
+**MCPチェックをスキップ（モックモード）:**
+
+```bash
+# テスト目的でMCP不要の場合
+node bin/othello.js --url https://example.com --llm-provider mock
 ```
 
 ### サイト探索モード（仕様書なし）
