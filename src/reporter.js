@@ -358,6 +358,79 @@ class Reporter {
 
     return html;
   }
+
+  /**
+   * 全フォーマットのレポートを保存（JSON, Markdown, HTML）
+   * @param {Object} reportData - レポートデータ
+   * @param {string} sessionId - セッションID
+   * @returns {Promise<Object>} 保存されたファイルパス
+   */
+  async saveAllReports(reportData, sessionId) {
+    const outputDir = this.config.config.paths?.reports || this.config.config.outputDir || './reports';
+    await fs.mkdir(outputDir, { recursive: true });
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const baseName = `othello-report-${sessionId || timestamp}`;
+    
+    // JSON形式で保存
+    const jsonPath = path.join(outputDir, `${baseName}.json`);
+    await fs.writeFile(jsonPath, JSON.stringify(reportData, null, 2), 'utf8');
+    
+    // Markdown形式で保存
+    const mdPath = path.join(outputDir, `${baseName}.md`);
+    const markdown = this.generateMarkdown(reportData);
+    await fs.writeFile(mdPath, markdown, 'utf8');
+    
+    // HTML形式で保存
+    const htmlPath = path.join(outputDir, `${baseName}.html`);
+    const html = await this.generateHTML(reportData);
+    await fs.writeFile(htmlPath, html, 'utf8');
+    
+    return {
+      json: jsonPath,
+      markdown: mdPath,
+      html: htmlPath
+    };
+  }
+
+  /**
+   * Markdown形式のレポートを生成
+   * @param {Object} reportData - レポートデータ
+   * @returns {string} Markdown形式のレポート
+   */
+  generateMarkdown(reportData) {
+    const { sessionId, startTime, endTime, totalDuration, iterations, coverage, executionResults } = reportData;
+    
+    let md = `# Othello Test Report\n\n`;
+    md += `**Session ID:** ${sessionId}\n`;
+    md += `**Start Time:** ${new Date(startTime).toLocaleString()}\n`;
+    md += `**End Time:** ${new Date(endTime).toLocaleString()}\n`;
+    md += `**Duration:** ${Math.round(totalDuration / 1000)}s\n\n`;
+    
+    md += `## Summary\n\n`;
+    md += `- **Iterations:** ${iterations}\n`;
+    md += `- **Coverage:** ${coverage?.percentage?.toFixed(2) || 0}% (${coverage?.covered || 0}/${coverage?.total || 0} aspects)\n`;
+    md += `- **Tests Passed:** ${executionResults.filter(r => r.success).length}\n`;
+    md += `- **Tests Failed:** ${executionResults.filter(r => !r.success).length}\n`;
+    md += `- **Auto-Healed:** ${executionResults.filter(r => r.healed).length}\n\n`;
+    
+    md += `## Test Results\n\n`;
+    executionResults.forEach((result, index) => {
+      const status = result.success ? '✅' : '❌';
+      md += `### ${index + 1}. ${result.test_case_id} ${status}\n\n`;
+      md += `- **Aspect:** ${result.aspect_no}\n`;
+      md += `- **Duration:** ${result.duration_ms}ms\n`;
+      if (result.healed) {
+        md += `- **Auto-Healed:** Yes (${result.heal_method})\n`;
+      }
+      if (result.error) {
+        md += `- **Error:** ${result.error}\n`;
+      }
+      md += `\n`;
+    });
+    
+    return md;
+  }
 }
 
 module.exports = Reporter;

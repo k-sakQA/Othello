@@ -385,61 +385,11 @@ test('Fixed test', async ({ page }) => {
     const executor = new OthelloExecutor({ playwrightMCP: playwrightAgent, config });
     const healer = new OthelloHealer({ llm, config });
     
-    // モックAnalyzer（Phase 9対応）
-    let mockCoverage = 30; // 初期カバレッジ
-    const analyzer = {
-      async analyze(executionResults) {
-        // イテレーションごとにカバレッジを増加
-        mockCoverage = Math.min(100, mockCoverage + Math.random() * 15 + 5);
-        
-        return {
-          aspectCoverage: {
-            percentage: mockCoverage,
-            covered: Math.floor(mockCoverage / 10),
-            total: 10
-          },
-          visitedPages: ['reserve.html', 'confirmation.html'],
-          testedFeatures: ['form_input', 'button_click', 'validation'],
-          timestamp: new Date().toISOString()
-        };
-      },
-      analyzeWithHistory(history) {
-        return {
-          cumulativeCoverage: {
-            percentage: mockCoverage,
-            covered: Math.floor(mockCoverage / 10),
-            total: 10
-          },
-          iterations: history.length
-        };
-      }
-    };
+    // Analyzer（Phase 9対応 - 実際のAnalyzerを使用）
+    const analyzer = new Analyzer(config);
     
-    // モックReporter（Phase 9対応）
-    const reporter = {
-      async saveReport(data, filename) {
-        console.log(`  Report saved: ${filename}`);
-        return { success: true, path: filename };
-      },
-      async generateReport(history) {
-        return {
-          iterations: history.length,
-          coverage: 0,
-          passed: 0,
-          failed: 0
-        };
-      },
-      async saveAllReports(reportData) {
-        console.log('  Generating final reports...');
-        await fs.mkdir(config.outputDir, { recursive: true });
-        
-        const reportPath = path.join(config.outputDir, 'final-report.json');
-        await fs.writeFile(reportPath, JSON.stringify(reportData, null, 2));
-        
-        console.log(`  📊 Final report saved: ${reportPath}`);
-        return { success: true, paths: [reportPath] };
-      }
-    };
+    // Reporter（Phase 9対応 - 実際のReporterを使用）
+    const reporter = new Reporter(config);
     
     // Orchestratorの作成と実行
     const orchestrator = new Orchestrator(config);

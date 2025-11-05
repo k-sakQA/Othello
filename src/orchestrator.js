@@ -42,13 +42,18 @@ class Orchestrator {
       if (this.playwrightMCP) {
         await this.playwrightMCP.setupPage(this.config.url);
       }
-      while (this.shouldContinue()) {
-        this.iteration++;
-        const iterationResult = await this.runIteration();
-        
-        // 早期終了チェック
-        if (iterationResult && iterationResult.earlyExit) {
-          break;
+      
+      let continueLoop = true;
+      while (continueLoop) {
+        // 通常イテレーションの実行チェック
+        if (this.shouldContinue()) {
+          this.iteration++;
+          const iterationResult = await this.runIteration();
+          
+          // 早期終了チェック
+          if (iterationResult && iterationResult.earlyExit) {
+            break;
+          }
         }
         
         // 対話モードが有効な場合、推奨テストを表示
@@ -67,20 +72,34 @@ class Orchestrator {
               console.log('\n👋 ユーザーによる終了');
               break;
             } else if (userAction.type === 'specific') {
-              // 選択されたテストを実行
+              // 選択されたテストを実行（イテレーションカウントは増やさない）
               await this.executeSpecificTest(userAction.recommendation);
+              // 対話モードでは、maxIterationsを超えても継続可能
+              continue;
             } else if (userAction.type === 'deeper') {
-              // より深いテストを生成・実行
+              // より深いテストを生成・実行（イテレーションカウントは増やさない）
               await this.executeDeeperTests(userAction.recommendation);
+              // 対話モードでは、maxIterationsを超えても継続可能
+              continue;
             } else if (userAction.type === 'complete') {
               // 完了オプション選択
               const completeResult = await this.handleCompleteOption(userAction.recommendation);
               if (completeResult.shouldExit) {
                 break;
               }
+              continue;
             }
             // type === 'continue' の場合は、通常のループ継続
+          } else {
+            // 推奨テストがない場合は終了
+            console.log('\n✅ 全ての観点がカバー済みです。');
+            break;
           }
+        }
+        
+        // 対話モードでない場合、通常のイテレーション制限で終了
+        if (!this.config.interactive && !this.shouldContinue()) {
+          break;
         }
         
         if (this.isStagnant()) {
