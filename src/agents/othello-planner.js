@@ -251,8 +251,12 @@ JSON配列で出力してください：
     const testCases = [];
     for (const aspect of analysis) {
       for (const testCase of aspect.test_cases || []) {
+        // LLMからの出力(case_id, title)をOrchestrator/Reporterが期待する形式(test_case_id, description)に変換
+        const { case_id, title, ...rest } = testCase;
         testCases.push({
-          ...testCase,
+          test_case_id: case_id,  // case_id → test_case_id
+          description: title,     // title → description
+          ...rest,
           aspect_no: aspect.aspect_no,
           test_type: aspect.test_type,
           priority: aspect.priority || 'P2'
