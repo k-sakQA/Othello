@@ -44,20 +44,50 @@ class Reporter {
 
   /**
    * 実行結果からサマリーを生成
-   * @param {Array} results - 実行結果の配列
+   * @param {Object} results - 実行結果オブジェクト（executionResultsフィールドを含む）
    * @param {number} iterations - イテレーション数
    * @returns {Object} サマリー
    */
   createSummaryFromResults(results, iterations) {
-    const totalTests = results.length;
-    const passed = results.filter(r => r.status === 'passed' || r.status === 'success').length;
-    const failed = results.filter(r => r.status === 'failed' || r.status === 'error').length;
+    // null/undefined対応
+    if (!results) {
+      return {
+        total_iterations: iterations || 0,
+        total_tests: 0,
+        tests_passed: 0,
+        tests_failed: 0,
+        success_rate: 0,
+        coverage_percentage: 0,
+        covered_aspects: [],
+        executionResults: []
+      };
+    }
+
+    // executionResultsフィールドを取得（配列またはオブジェクト対応）
+    const executionResults = results.executionResults || [];
+    const totalTests = executionResults.length;
+    
+    // successフラグでカウント（success === true を成功とする）
+    const passed = executionResults.filter(r => r.success === true).length;
+    const failed = totalTests - passed;
+    
+    // 成功率を計算
+    const successRate = totalTests > 0 ? Math.round((passed / totalTests) * 100 * 100) / 100 : 0;
+    
+    // カバレッジ情報を取得
+    const coverage = results.coverage || {};
+    const coveragePercentage = coverage.percentage || 0;
+    const coveredAspects = coverage.covered_aspects || [];
     
     return {
-      total_iterations: iterations,
+      total_iterations: iterations || 1,
       total_tests: totalTests,
-      passed: passed,
-      failed: failed
+      tests_passed: passed,
+      tests_failed: failed,
+      success_rate: successRate,
+      coverage_percentage: coveragePercentage,
+      covered_aspects: coveredAspects,
+      executionResults: executionResults // テスト詳細を保持
     };
   }
 
@@ -68,13 +98,13 @@ class Reporter {
    */
   formatSummary(summary) {
     const totalTests = summary.total_tests || 0;
-    const passedTests = summary.passed || 0;
-    const failedTests = summary.failed || 0;
+    const passedTests = summary.tests_passed || summary.passed || 0;
+    const failedTests = summary.tests_failed || summary.failed || 0;
     
     // 成功率を計算（ゼロ除算を回避）
-    const successRate = totalTests > 0 
-      ? (passedTests / totalTests) * 100 
-      : 0;
+    const successRate = summary.success_rate !== undefined 
+      ? summary.success_rate 
+      : (totalTests > 0 ? Math.round((passedTests / totalTests) * 100 * 100) / 100 : 0);
 
     return {
       totalIterations: summary.total_iterations || 0,
@@ -129,8 +159,8 @@ class Reporter {
    * @returns {Promise<string>} HTML文字列
    */
   async generateHTML(data) {
-    // summaryがない場合はexecutionResultsから生成
-    const summary = data.summary || this.createSummaryFromResults(data.executionResults || [], data.iterations || 0);
+    // summaryがない場合はdataオブジェクト全体から生成（executionResults, coverageを含む）
+    const summary = data.summary || this.createSummaryFromResults(data, data.iterations || 1);
     const formattedSummary = this.formatSummary(summary);
     // iterationsが数値の場合は空配列、配列の場合はそのまま使用
     const iterationsArray = Array.isArray(data.iterations) ? data.iterations : [];
@@ -371,6 +401,57 @@ class Reporter {
       </div>
     </div>
     `).join('')}
+
+    ${summary.executionResults && summary.executionResults.length > 0 ? `
+    <h2>📝 テスト詳細</h2>
+    ${summary.executionResults.map(result => `
+    <div class="iteration ${result.success ? 'success' : 'partial'}" style="margin-bottom: 15px;">
+      <div class="iteration-header">
+        <div class="iteration-title">${result.test_case_id || 'N/A'}</div>
+        <div class="iteration-status status-${result.success ? 'success' : 'partial'}">
+          ${result.success ? '✓ 成功' : '✗ 失敗'}
+        </div>
+      </div>
+      ${result.test_case ? `
+      <div style="padding: 10px; background: white; border-radius: 5px; margin-top: 10px;">
+        <div style="margin-bottom: 10px;">
+          <strong>テストタイプ:</strong> ${result.test_case.test_type || 'N/A'} | 
+          <strong>観点番号:</strong> ${result.test_case.aspect_no || 'N/A'}
+        </div>
+        <div style="margin-bottom: 10px;">
+          <strong>説明:</strong> ${result.test_case.description || '説明なし'}
+        </div>
+        ${result.test_case.steps && result.test_case.steps.length > 0 ? `
+        <div style="margin-bottom: 10px;">
+          <strong>手順:</strong>
+          <ol style="margin-left: 20px; margin-top: 5px;">
+            ${result.test_case.steps.map(step => `
+            <li>${step.action || ''} ${step.target ? `- ${step.target}` : ''} ${step.value ? `(値: ${step.value})` : ''}</li>
+            `).join('')}
+          </ol>
+        </div>
+        ` : ''}
+        ${result.test_case.expected_results && result.test_case.expected_results.length > 0 ? `
+        <div style="margin-bottom: 10px;">
+          <strong>期待結果:</strong>
+          <ul style="margin-left: 20px; margin-top: 5px;">
+            ${result.test_case.expected_results.map(exp => `<li>${exp}</li>`).join('')}
+          </ul>
+        </div>
+        ` : ''}
+      </div>
+      ` : '<div style="padding: 10px; background: white; border-radius: 5px; margin-top: 10px; color: #7f8c8d;">テスト内容の詳細情報がありません</div>'}
+      ${result.error ? `
+      <div style="padding: 10px; background: #f8d7da; border-radius: 5px; margin-top: 10px; color: #721c24;">
+        <strong>エラー:</strong> ${result.error.message || 'エラーメッセージなし'}
+      </div>
+      ` : ''}
+      <div style="padding: 5px 10px; font-size: 0.9em; color: #7f8c8d;">
+        実行時間: ${result.duration_ms || 0}ms
+      </div>
+    </div>
+    `).join('')}
+    ` : ''}
 
     <div class="footer">
       <p>Generated by Othello - Playwright E2E Test Automation Tool</p>
