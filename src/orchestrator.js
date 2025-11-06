@@ -165,12 +165,17 @@ class Orchestrator {
       // generatedTestsは配列で直接返される
       for (const testCase of generatedTests) {
         const result = await this.executor.execute(testCase);
+        
+        // 元のtest_case情報を取得（Plannerから返されたもの）
+        const originalTestCase = testPlan.testCases.find(tc => tc.test_case_id === testCase.test_case_id);
+        
         iterationResults.executionResults.push({
           test_case_id: testCase.test_case_id,
           aspect_no: testCase.aspect_no,
           success: result.success,
           duration_ms: result.duration_ms,
-          error: result.error
+          error: result.error,
+          test_case: originalTestCase // 元のテスト内容を保存
         });
         if (!result.success && this.config.autoHeal) {
           console.log(`\n🔧 Auto-healing test case: ${testCase.test_case_id}`);
@@ -245,6 +250,8 @@ class Orchestrator {
           return { earlyExit: true, coverage: cumulativeCoverage };
         }
       }
+      
+      return iterationResults; // イテレーション結果を返す
     } catch (error) {
       console.error(`Iteration ${this.iteration} failed:`, error.message);
       throw error;
