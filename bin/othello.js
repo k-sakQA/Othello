@@ -229,7 +229,7 @@ async function main() {
     const argv = setupCLI();
 
     // 設定の構築
-    const config = {
+    let config = {
       url: argv.url,
       maxIterations: argv['max-iterations'],
       coverageTarget: argv['coverage-target'],

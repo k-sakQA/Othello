@@ -37,6 +37,7 @@ const validConfig = {
   ],
   "playwright_agent": {
     "vscode_workspace": "/test/workspace",
+    "api_endpoint": "http://localhost:3000/playwright-agent",
     "planner_settings": {
       "max_test_scenarios": 10,
       "focus_on_edge_cases": true
