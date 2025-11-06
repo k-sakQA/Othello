@@ -3,9 +3,114 @@
  */
 
 const Orchestrator = require('../src/orchestrator');
-const Analyzer = require('../src/analyzer');
+const OthelloAnalyzer = require('../src/agents/othello-analyzer');
 
 describe('Orchestrator - 対話機能', () => {
+  describe('Analyzer初期化（TDD）', () => {
+    it('interactive=trueの場合、run()でanalyzerが初期化される', async () => {
+      const orchestrator = new Orchestrator({
+        url: 'https://example.com',
+        interactive: true,
+        maxIterations: 1,
+        testAspectsCSV: './config/test-ViewpointList-simple.csv'
+      });
+
+      // 初期状態ではanalyzerはnull
+      expect(orchestrator.analyzer).toBeNull();
+
+      // runメソッドのモック（実際のテスト実行はスキップ）
+      orchestrator.runIteration = jest.fn().mockResolvedValue({
+        iteration: 1,
+        testCases: [],
+        executionResults: [],
+        coverage: { percentage: 100, covered: 10, total: 10 }
+      });
+
+      orchestrator.planner = { generateTestPlan: jest.fn().mockResolvedValue({ testCases: [] }) };
+      orchestrator.generator = { generate: jest.fn().mockResolvedValue([]) };
+      orchestrator.executor = { execute: jest.fn().mockResolvedValue({ success: true }) };
+      orchestrator.reporter = { 
+        generateReport: jest.fn().mockResolvedValue({}),
+        saveReport: jest.fn().mockResolvedValue({})
+      };
+
+      try {
+        await orchestrator.run();
+      } catch (e) {
+        // run()が途中で終わっても問題なし
+      }
+
+      // run()実行後、analyzerが初期化される
+      expect(orchestrator.analyzer).not.toBeNull();
+      expect(orchestrator.analyzer).toBeInstanceOf(OthelloAnalyzer);
+    });
+
+    it('interactive=falseの場合、analyzerは初期化されない', async () => {
+      const orchestrator = new Orchestrator({
+        url: 'https://example.com',
+        interactive: false,
+        maxIterations: 1
+      });
+
+      orchestrator.runIteration = jest.fn().mockResolvedValue({
+        iteration: 1,
+        testCases: [],
+        executionResults: [],
+        coverage: { percentage: 100, covered: 10, total: 10 }
+      });
+
+      orchestrator.planner = { generateTestPlan: jest.fn().mockResolvedValue({ testCases: [] }) };
+      orchestrator.generator = { generate: jest.fn().mockResolvedValue([]) };
+      orchestrator.executor = { execute: jest.fn().mockResolvedValue({ success: true }) };
+      orchestrator.reporter = { 
+        generateReport: jest.fn().mockResolvedValue({}),
+        saveReport: jest.fn().mockResolvedValue({})
+      };
+
+      try {
+        await orchestrator.run();
+      } catch (e) {
+        // 初期化確認が目的
+      }
+
+      // interactive=falseの場合、analyzerはnullのまま
+      expect(orchestrator.analyzer).toBeNull();
+    });
+
+    it('analyzerが初期化されると対話モード条件がtrueになる', async () => {
+      const orchestrator = new Orchestrator({
+        url: 'https://example.com',
+        interactive: true,
+        maxIterations: 1
+      });
+
+      orchestrator.runIteration = jest.fn().mockResolvedValue({
+        iteration: 1,
+        testCases: [],
+        executionResults: [],
+        coverage: { percentage: 0, covered: 0, total: 10 }
+      });
+
+      orchestrator.planner = { generateTestPlan: jest.fn().mockResolvedValue({ testCases: [] }) };
+      orchestrator.generator = { generate: jest.fn().mockResolvedValue([]) };
+      orchestrator.executor = { execute: jest.fn().mockResolvedValue({ success: true }) };
+      orchestrator.reporter = { 
+        generateReport: jest.fn().mockResolvedValue({}),
+        saveReport: jest.fn().mockResolvedValue({})
+      };
+
+      try {
+        await orchestrator.run();
+      } catch (e) {
+        // 初期化確認が目的
+      }
+
+      // 対話モード条件: this.config.interactive && this.analyzer
+      const interactiveModeCondition = orchestrator.config.interactive && orchestrator.analyzer;
+      expect(interactiveModeCondition).toBe(true);
+    });
+  });
+
   let orchestrator;
   
   beforeEach(() => {

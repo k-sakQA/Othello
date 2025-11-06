@@ -38,6 +38,13 @@ class Orchestrator {
   async run() {
     this.startTime = new Date();
     console.log('Phase 9 Orchestrator starting...');
+    
+    // 対話モードの場合、Analyzerを初期化
+    if (this.config.interactive) {
+      this.analyzer = new OthelloAnalyzer();
+      console.log('✓ Analyzer initialized for interactive mode');
+    }
+    
     try {
       if (this.playwrightMCP) {
         await this.playwrightMCP.setupPage(this.config.url);
