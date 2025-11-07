@@ -9,6 +9,7 @@ const OthelloExecutor = require('./agents/othello-executor');
 const OthelloHealer = require('./agents/othello-healer');
 const OthelloAnalyzer = require('./agents/othello-analyzer');
 const OthelloReporter = require('./agents/othello-reporter');
+const ArtifactStorage = require('./artifact-storage');
 
 class Orchestrator {
   constructor(config = {}) {
@@ -33,6 +34,10 @@ class Orchestrator {
     this.analyzer = null;
     this.reporter = null;
     this.playwrightMCP = null;
+    this.artifactStorage = new ArtifactStorage({
+      sessionId: this.sessionId,
+      outputDir: this.config.outputDir
+    });
   }
 
   async run() {
@@ -118,6 +123,9 @@ class Orchestrator {
       await this.generateFinalReport();
       this.endTime = new Date();
       
+      // 💾 成果物サマリーを表示
+      this.artifactStorage.printSummary();
+      
       // 実行結果を返す
       const currentCoverage = await this.getCurrentCoverage();
       // 新旧フォーマット両対応
@@ -163,12 +171,36 @@ class Orchestrator {
         uncoveredAspects: currentCoverage.uncovered_aspects || []
       });
       iterationResults.testCases = testPlan.testCases;
+      
+      // 💾 Plannerの生成物を保存
+      await this.artifactStorage.savePlannerOutput(this.iteration, {
+        iteration: this.iteration,
+        testCases: testPlan.testCases,
+        currentCoverage,
+        timestamp: new Date().toISOString()
+      });
+      
       const snapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
       const generatedTests = await this.generator.generate({ 
         testCases: testPlan.testCases, 
         snapshot,
         url: this.config.url 
       });
+      
+      // 💾 Generatorの生成物を保存（各テストケースごと）
+      for (const testCase of generatedTests) {
+        await this.artifactStorage.saveGeneratorOutput(
+          this.iteration,
+          testCase.test_case_id,
+          {
+            iteration: this.iteration,
+            testCaseId: testCase.test_case_id,
+            generatedTests: [testCase],
+            timestamp: new Date().toISOString()
+          }
+        );
+      }
+      
       // generatedTestsは配列で直接返される
       for (const testCase of generatedTests) {
         const result = await this.executor.execute(testCase);
