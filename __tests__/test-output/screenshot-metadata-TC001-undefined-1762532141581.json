@@ -1,0 +1,10 @@
+{
+  "type": "error",
+  "instruction_index": 1,
+  "instruction_type": "click",
+  "error_message": "Click failed",
+  "screenshot_path": "C:\\workspace\\Othello\\__tests__\\test-output\\screenshots\\20251107-011541\\iteration-1\\TC001-error-instruction-1-1762532141580.png",
+  "timestamp": "2025-11-07T16:15:41.581Z",
+  "sessionId": "20251107-011541",
+  "savedAt": "2025-11-07T16:15:41.581Z"
+}

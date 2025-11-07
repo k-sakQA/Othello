@@ -4,8 +4,9 @@
  */
 
 class OthelloExecutor {
-  constructor({ playwrightMCP, config = {} }) {
+  constructor({ playwrightMCP, artifactStorage = null, config = {} }) {
     this.playwrightMCP = playwrightMCP;
+    this.artifactStorage = artifactStorage;
     this.config = {
       timeout: config.timeout || 30000,
       headless: config.headless !== undefined ? config.headless : true,
@@ -55,6 +56,15 @@ class OthelloExecutor {
             
             // 失敗時のスナップショットを取得
             result.snapshot = await this.captureSnapshot();
+            
+            // スクリーンショットを撮影して保存
+            await this.captureScreenshotOnError(
+              testCase.test_case_id,
+              result.executed_instructions - 1,
+              instruction.type,
+              instructionResult.error || 'Instruction execution failed'
+            );
+            
             result.error = {
               message: instructionResult.error || 'Instruction execution failed',
               instruction_index: result.executed_instructions - 1,
@@ -74,6 +84,14 @@ class OthelloExecutor {
           
           // 失敗時のスナップショットを取得
           result.snapshot = await this.captureSnapshot();
+          
+          // スクリーンショットを撮影して保存
+          await this.captureScreenshotOnError(
+            testCase.test_case_id,
+            result.executed_instructions - 1,
+            instruction.type,
+            error.message
+          );
           
           result.instructions_results.push({
             success: false,
@@ -236,6 +254,48 @@ class OthelloExecutor {
 
       default:
         return { intent };
+    }
+  }
+
+  /**
+   * エラー時のスクリーンショットを撮影して保存
+   * @param {string} testCaseId - テストケースID
+   * @param {number} instructionIndex - 命令のインデックス
+   * @param {string} instructionType - 命令のタイプ
+   * @param {string} errorMessage - エラーメッセージ
+   */
+  async captureScreenshotOnError(testCaseId, instructionIndex, instructionType, errorMessage) {
+    // artifactStorageがない場合は何もしない
+    if (!this.artifactStorage) {
+      return;
+    }
+
+    try {
+      const iteration = this.config.iteration || 1;
+      const timestamp = Date.now();
+      const stepName = `error-instruction-${instructionIndex}-${timestamp}`;
+      
+      // ディレクトリを作成
+      await this.artifactStorage.ensureScreenshotDir(iteration, testCaseId);
+      
+      // スクリーンショットパスを取得
+      const screenshotPath = this.artifactStorage.getScreenshotPath(iteration, testCaseId, stepName);
+      
+      // スクリーンショットを撮影
+      await this.playwrightMCP.screenshot(screenshotPath);
+      
+      // メタデータを保存
+      await this.artifactStorage.saveScreenshotMetadata(iteration, testCaseId, {
+        type: 'error',
+        instruction_index: instructionIndex,
+        instruction_type: instructionType,
+        error_message: errorMessage,
+        screenshot_path: screenshotPath,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      // スクリーンショット撮影のエラーは無視（テスト実行を妨げない）
+      console.warn('Failed to capture screenshot:', error.message);
     }
   }
 

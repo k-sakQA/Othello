@@ -45,6 +45,7 @@ describe('Orchestrator - ArtifactStorage統合', () => {
     };
 
     orchestrator.executor = {
+      config: {},
       execute: jest.fn().mockResolvedValue({
         success: true,
         duration_ms: 100

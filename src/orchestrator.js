@@ -162,6 +162,13 @@ class Orchestrator {
       executionResults: [],
       coverage: null
     };
+    
+    // 現在のiterationをconfigに設定（Executorがスクリーンショットに使用）
+    this.config.iteration = this.iteration;
+    if (this.executor && this.executor.config) {
+      this.executor.config.iteration = this.iteration;
+    }
+    
     try {
       const currentCoverage = await this.getCurrentCoverage();
       const testPlan = await this.planner.generateTestPlan({

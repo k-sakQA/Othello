@@ -1,0 +1,10 @@
+{
+  "type": "error",
+  "instruction_index": 1,
+  "instruction_type": "fill",
+  "error_message": "Failed",
+  "screenshot_path": "C:\\workspace\\Othello\\__tests__\\test-output\\screenshots\\20251107-011522\\iteration-2\\TC002-error-instruction-1-1762532122338.png",
+  "timestamp": "2025-11-07T16:15:22.339Z",
+  "sessionId": "20251107-011522",
+  "savedAt": "2025-11-07T16:15:22.339Z"
+}

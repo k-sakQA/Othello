@@ -472,7 +472,15 @@ test('Fixed test', async ({ page }) => {
     console.log('🚀 Initializing agents...');
     const planner = new OthelloPlanner({ llm, config });
     const generator = new OthelloGenerator({ llm, config });
-    const executor = new OthelloExecutor({ playwrightMCP: playwrightAgent, config });
+    
+    // Orchestratorを先に作成してartifactStorageを取得
+    const orchestrator = new Orchestrator(config);
+    
+    const executor = new OthelloExecutor({ 
+      playwrightMCP: playwrightAgent, 
+      artifactStorage: orchestrator.artifactStorage,
+      config 
+    });
     const healer = new OthelloHealer({ llm, config });
     
     // Analyzer（Phase 9対応 - 実際のAnalyzerを使用）
@@ -481,8 +489,7 @@ test('Fixed test', async ({ page }) => {
     // Reporter（Phase 9対応 - 実際のReporterを使用）
     const reporter = new Reporter(config);
     
-    // Orchestratorの作成と実行
-    const orchestrator = new Orchestrator(config);
+    // Orchestratorのエージェント設定
     orchestrator.planner = planner;
     orchestrator.generator = generator;
     orchestrator.executor = executor;

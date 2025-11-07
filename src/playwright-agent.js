@@ -715,6 +715,87 @@ class Othello {
   }
 
   /**
+   * スクリーンショットを撮影
+   * @param {string} filename - 保存先ファイルパス
+   * @param {Object} options - オプション（fullPage等）
+   * @returns {Promise<Object>} 実行結果
+   */
+  async screenshot(filename, options = {}) {
+    if (this.mockMode) {
+      await this.logExecution('info', 'screenshot', {
+        mode: 'mock',
+        filename,
+        options
+      });
+      return { success: true, filename };
+    }
+
+    try {
+      // セッションが初期化されていない場合は自動初期化
+      if (!this.isSessionInitialized) {
+        await this.initializeSession();
+      }
+
+      // MCPツールを呼び出し
+      const mcpResult = await this.mcpClient.callTool('browser_take_screenshot', {
+        filename,
+        fullPage: options.fullPage || false,
+        type: options.type || 'png'
+      });
+
+      await this.logExecution('info', 'screenshot', {
+        filename,
+        success: mcpResult.success
+      });
+
+      return mcpResult;
+
+    } catch (error) {
+      await this.logExecution('error', 'screenshot', {
+        filename,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * ページのアクセシビリティスナップショットを取得
+   * @returns {Promise<string>} スナップショット内容
+   */
+  async snapshot() {
+    if (this.mockMode) {
+      await this.logExecution('info', 'snapshot', {
+        mode: 'mock'
+      });
+      return 'mock-snapshot-content';
+    }
+
+    try {
+      // セッションが初期化されていない場合は自動初期化
+      if (!this.isSessionInitialized) {
+        await this.initializeSession();
+      }
+
+      // MCPツールを呼び出し
+      const mcpResult = await this.mcpClient.callTool('browser_snapshot', {});
+
+      await this.logExecution('info', 'snapshot', {
+        success: mcpResult.success
+      });
+
+      // スナップショット内容を返す
+      return mcpResult.content || mcpResult.snapshot || '';
+
+    } catch (error) {
+      await this.logExecution('error', 'snapshot', {
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
    * ブラウザを起動（将来の実装）
    * @returns {Promise<void>}
    */

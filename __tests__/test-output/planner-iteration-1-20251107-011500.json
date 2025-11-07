@@ -1,0 +1,24 @@
+{
+  "iteration": 1,
+  "currentCoverage": {
+    "percentage": 0,
+    "covered": 0,
+    "total": 10,
+    "covered_aspects": [],
+    "uncovered_aspects": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "timestamp": "2025-11-07T16:15:00.600Z",
+  "sessionId": "20251107-011500",
+  "savedAt": "2025-11-07T16:15:00.600Z"
+}

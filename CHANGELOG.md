@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 9: Screenshot Capture & Artifact Storage
+
+#### スクリーンショット自動撮影機能 (2025-11-07)
+- **エラー時自動撮影**: テスト失敗時に画面状態を自動的にスクリーンショット保存
+- **イテレーション別管理**: イテレーションごとにスクリーンショットを整理
+- **メタデータ記録**: スクリーンショットのメタデータ（タイムスタンプ、エラーメッセージ、命令情報）をJSON保存
+- **ArtifactStorage統合**: 一元的な成果物管理システムとの統合
+- **Executor自動撮影**: Executorが失敗検出時に自動的にスクリーンショットを撮影
+- **PlaywrightAgent拡張**: `screenshot()`と`snapshot()`メソッドを追加
+
+ディレクトリ構造:
+```
+screenshots/
+├── {session-id}/
+│   ├── iteration-1/
+│   │   ├── TC001-error-instruction-1-{timestamp}.png
+│   │   └── TC002-error-instruction-2-{timestamp}.png
+│   └── iteration-2/
+│       └── ...
+```
+
+Tests: 30テスト追加（全パス）
+- Executor統合テスト: 10テスト
+- Orchestrator統合テスト: 6テスト
+- ArtifactStorage機能: 11テスト
+- スクリーンショットキャプチャ: 9テスト
+
 ### Added - Phase 8: Session Management & Error Recovery
 
 #### エラーリカバリー機能 (2025-10-22)
