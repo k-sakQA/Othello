@@ -93,6 +93,12 @@ function setupCLI() {
       description: 'Enable verbose logging',
       default: false
     })
+    .option('interactive', {
+      alias: 'i',
+      type: 'boolean',
+      description: 'Enable interactive mode (pause after each iteration)',
+      default: false
+    })
     .option('llm-provider', {
       type: 'string',
       description: 'LLM provider (openai, claude, mock)',
@@ -239,6 +245,7 @@ async function main() {
       browser: argv.browser,
       headless: argv.headless,
       verbose: argv.verbose,
+      interactive: argv.interactive,
       llmProvider: argv['llm-provider']
     };
 

@@ -45,17 +45,17 @@ class Analyzer {
    */
   analyzeTestAspects(executionResults) {
     // ユニークなaspect_noを取得
-    const coveredAspects = new Set();
-    const allAspects = new Set();
+    const coveredAspects = new Set(); // 成功したテストの観点
+    const attemptedAspects = new Set(); // 試みられた全ての観点（成功/失敗問わず）
     const passedTests = executionResults.filter(r => r.success).length;
     const failedTests = executionResults.filter(r => !r.success).length;
     const healedTests = executionResults.filter(r => r.healed).length;
     
     for (const result of executionResults) {
       if (result.aspect_no) {
-        allAspects.add(result.aspect_no);
+        attemptedAspects.add(result.aspect_no); // 試みられた観点
         if (result.success) {
-          coveredAspects.add(result.aspect_no);
+          coveredAspects.add(result.aspect_no); // 成功した観点
         }
       }
     }
@@ -66,10 +66,10 @@ class Analyzer {
     const covered = coveredAspects.size;
     const percentage = (covered / totalAspects) * 100;
     
-    // 未カバーの観点を特定
+    // 未カバーの観点を特定（一度も試みられていない観点のみ）
     const uncoveredAspects = [];
     for (let i = 1; i <= totalAspects; i++) {
-      if (!coveredAspects.has(i)) {
+      if (!attemptedAspects.has(i)) {
         uncoveredAspects.push(i);
       }
     }

@@ -23,8 +23,14 @@ class OthelloAnalyzer {
    * @returns {Object} カバレッジ情報
    */
   analyze(executionResults) {
-    // テスト済み観点を抽出
+    // テスト済み観点を抽出（成功・失敗問わず）
     const testedAspects = this.extractTestedAspects(executionResults);
+    
+    // 成功した観点のみを抽出
+    const coveredAspects = executionResults
+      .filter(r => r.success && r.aspect_no !== undefined)
+      .map(r => r.aspect_no);
+    const uniqueCovered = [...new Set(coveredAspects)].sort((a, b) => a - b);
 
     // 観点カバレッジを計算
     const aspectCoverage = this.calculateAspectCoverage(testedAspects);
@@ -32,9 +38,17 @@ class OthelloAnalyzer {
     // テストケースカバレッジを計算
     const testCaseCoverage = this.calculateTestCaseCoverage(executionResults);
 
+    // Orchestrator互換のフラット形式も返す
     return {
+      // ネストした形式（後方互換性のため）
       aspectCoverage,
-      testCaseCoverage
+      testCaseCoverage,
+      // フラット形式（Orchestratorが使用）
+      percentage: aspectCoverage.percentage,
+      covered: uniqueCovered.length,
+      total: this.totalAspects,
+      covered_aspects: uniqueCovered,
+      uncovered_aspects: aspectCoverage.untested_aspects
     };
   }
 
@@ -242,29 +256,78 @@ class OthelloAnalyzer {
    * @param {Array} executionResults - 実行結果の配列
    * @returns {Array} 推奨テストの配列
    */
-  generateRecommendations(coverage, executionResults = []) {
+  async generateRecommendations(executionResults = [], coverageData = {}) {
     const recommendations = [];
+    const maxRecommendations = 5;
     
-    // 未カバー観点から推奨を生成
-    const untestedAspects = coverage.aspectCoverage?.untested_aspects || 
-                            coverage.uncovered_aspects || 
+    // 1. 失敗したテストを抽出（重複する観点は最新のもののみ）
+    const failedTests = new Map(); // aspectId -> 最新の失敗テスト
+    
+    if (executionResults && Array.isArray(executionResults)) {
+      for (const result of executionResults) {
+        if (!result.success && result.aspect_no) {
+          // 同じ観点の失敗は最新のもので上書き
+          failedTests.set(result.aspect_no, result);
+        }
+      }
+    }
+    
+    // 失敗したテストを推奨リストに追加
+    for (const [aspectId, failedTest] of failedTests) {
+      recommendations.push({
+        type: 'failed',
+        priority: 'High',
+        title: `失敗したテスト: 観点${aspectId}`,
+        reason: `前回実行で失敗: ${failedTest.error?.message || 'エラー'}`,
+        aspectId: aspectId,
+        originalTestCaseId: failedTest.test_case_id,
+        error: failedTest.error
+      });
+    }
+    
+    // 2. 未カバー観点から推奨を生成（失敗テストと合わせて最大5件まで）
+    const remainingSlots = maxRecommendations - recommendations.length;
+    
+    const uncoveredAspects = coverageData.uncovered_aspects || 
+                            coverageData.aspectCoverage?.untested_aspects || 
                             [];
     
-    // 最大5件の推奨を生成
-    const topUntested = untestedAspects.slice(0, 5);
+    if (remainingSlots > 0 && uncoveredAspects.length > 0) {
+      const topUncovered = uncoveredAspects.slice(0, remainingSlots);
+      
+      for (const aspectId of topUncovered) {
+        recommendations.push({
+          type: 'uncovered',
+          priority: 'High',
+          title: `観点${aspectId}のテスト`,
+          reason: `未カバー観点: 観点${aspectId}`,
+          aspectId: aspectId
+        });
+      }
+    }
     
-    topUntested.forEach((aspectNo, index) => {
+    // 3. 全観点がカバー済みで失敗もない場合、より深いテストを提案
+    const allCovered = !uncoveredAspects || uncoveredAspects.length === 0;
+    const noFailures = failedTests.size === 0;
+    
+    if (allCovered && noFailures && coverageData.percentage === 100) {
+      // より深いテストを生成するオプション
       recommendations.push({
-        id: index + 1,
-        priority: index < 2 ? 'High' : 'Medium',
-        title: `観点 ${aspectNo} のテスト`,
-        reason: `未カバー観点 (No.${aspectNo})`,
-        aspectNo: aspectNo
+        type: 'deeper',
+        priority: 'Medium',
+        title: 'より深いテスト（エッジケース、組み合わせテスト）を生成',
+        reason: '全観点がカバー済み。さらなるテスト品質向上のため',
+        requiresAI: true
       });
-    });
-    
-    // 失敗が多い観点を検出（今後の拡張ポイント）
-    // TODO: executionResults から失敗率の高い観点を抽出
+      
+      // テスト完了オプション
+      recommendations.push({
+        type: 'complete',
+        priority: 'Low',
+        title: 'テスト完了（終了）',
+        reason: '全観点がカバー済み。テストを完了します'
+      });
+    }
     
     return recommendations;
   }

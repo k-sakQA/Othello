@@ -373,4 +373,119 @@ describe('Othello-Analyzer', () => {
       expect(shouldContinue).toBe(true); // まだ21.74%なので継続
     });
   });
+
+  describe('generateRecommendations', () => {
+    test('未カバー観点を推奨する', async () => {
+      const executionResults = [
+        { test_case_id: 'TC001', aspect_no: 1, success: true }
+      ];
+      const coverageData = {
+        percentage: 4.35, // 1/23
+        covered: 1,
+        total: 23,
+        covered_aspects: [1],
+        uncovered_aspects: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+      };
+
+      const recommendations = await analyzer.generateRecommendations(executionResults, coverageData);
+
+      expect(recommendations).toBeDefined();
+      expect(recommendations.length).toBeGreaterThan(0);
+      expect(recommendations.length).toBeLessThanOrEqual(5); // 最大5件
+      
+      // 未カバー観点が推奨に含まれる
+      const uncoveredRecs = recommendations.filter(r => r.type === 'uncovered');
+      expect(uncoveredRecs.length).toBeGreaterThan(0);
+      expect(uncoveredRecs[0].aspectId).toBe(2); // 最初の未カバー観点
+    });
+
+    test('失敗したテストを優先的に推奨する', async () => {
+      const executionResults = [
+        { test_case_id: 'TC001', aspect_no: 1, success: true },
+        { test_case_id: 'TC002', aspect_no: 2, success: false, error: { message: 'テスト失敗' } }
+      ];
+      const coverageData = {
+        percentage: 8.70, // 2/23 (試みた観点)
+        covered: 1, // 成功したのは1つ
+        total: 23,
+        covered_aspects: [1],
+        uncovered_aspects: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+      };
+
+      const recommendations = await analyzer.generateRecommendations(executionResults, coverageData);
+
+      expect(recommendations).toBeDefined();
+      expect(recommendations.length).toBeGreaterThan(0);
+      
+      // 失敗したテストが最初に推奨される
+      const failedRecs = recommendations.filter(r => r.type === 'failed');
+      expect(failedRecs.length).toBe(1);
+      expect(failedRecs[0].aspectId).toBe(2);
+      expect(failedRecs[0].priority).toBe('High');
+      expect(failedRecs[0].title).toContain('失敗したテスト');
+    });
+
+    test('同じ観点の失敗は最新のもののみを推奨', async () => {
+      const executionResults = [
+        { test_case_id: 'TC001', aspect_no: 1, success: false, error: { message: '最初の失敗' } },
+        { test_case_id: 'TC002', aspect_no: 1, success: false, error: { message: '2回目の失敗' } }
+      ];
+      const coverageData = {
+        percentage: 4.35,
+        covered: 0,
+        total: 23,
+        covered_aspects: [],
+        uncovered_aspects: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+      };
+
+      const recommendations = await analyzer.generateRecommendations(executionResults, coverageData);
+
+      const failedRecs = recommendations.filter(r => r.type === 'failed');
+      expect(failedRecs.length).toBe(1); // 重複排除
+      expect(failedRecs[0].aspectId).toBe(1);
+      expect(failedRecs[0].error.message).toBe('2回目の失敗'); // 最新のエラー
+    });
+
+    test('全観点カバー済みで失敗なしの場合、より深いテストを提案', async () => {
+      const executionResults = [
+        { test_case_id: 'TC001', aspect_no: 1, success: true },
+        { test_case_id: 'TC002', aspect_no: 2, success: true }
+        // ... 全23観点成功
+      ];
+      const coverageData = {
+        percentage: 100,
+        covered: 23,
+        total: 23,
+        covered_aspects: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+        uncovered_aspects: []
+      };
+
+      const recommendations = await analyzer.generateRecommendations(executionResults, coverageData);
+
+      expect(recommendations.length).toBeGreaterThan(0);
+      
+      const deeperRec = recommendations.find(r => r.type === 'deeper');
+      expect(deeperRec).toBeDefined();
+      expect(deeperRec.priority).toBe('Medium');
+      
+      const completeRec = recommendations.find(r => r.type === 'complete');
+      expect(completeRec).toBeDefined();
+      expect(completeRec.priority).toBe('Low');
+    });
+
+    test('推奨は最大5件まで', async () => {
+      const executionResults = [];
+      const coverageData = {
+        percentage: 0,
+        covered: 0,
+        total: 23,
+        covered_aspects: [],
+        uncovered_aspects: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+      };
+
+      const recommendations = await analyzer.generateRecommendations(executionResults, coverageData);
+
+      expect(recommendations.length).toBeLessThanOrEqual(5);
+    });
+  });
 });
