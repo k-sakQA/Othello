@@ -425,9 +425,14 @@ class Reporter {
         <div style="margin-bottom: 10px;">
           <strong>手順:</strong>
           <ol style="margin-left: 20px; margin-top: 5px;">
-            ${result.test_case.steps.map(step => `
-            <li>${step.action || ''} ${step.target ? `- ${step.target}` : ''} ${step.value ? `(値: ${step.value})` : ''}</li>
-            `).join('')}
+            ${result.test_case.steps.map(step => {
+              // stepが文字列の場合とオブジェクトの場合の両方に対応
+              if (typeof step === 'string') {
+                return `<li>${step}</li>`;
+              } else {
+                return `<li>${step.action || ''} ${step.target ? `- ${step.target}` : ''} ${step.value ? `(値: ${step.value})` : ''}</li>`;
+              }
+            }).join('')}
           </ol>
         </div>
         ` : ''}
