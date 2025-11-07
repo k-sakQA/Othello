@@ -420,9 +420,39 @@ node bin/othello.js \
    reports\generator-iteration-1-TC002-20251107-002254.json
    ...
 
-📁 全ての成果物: ./reports
+� スクリーンショット (5件):
+   reports\screenshot-metadata-TC001-step-1-*.json
+   reports\screenshot-metadata-TC002-step-2-*.json
+   ...
+
+�📁 全ての成果物: ./reports
 ==========================================
 ```
+
+#### スクリーンショット機能
+
+スクリーンショットは以下の場合に自動的に撮影・保存されます：
+- **エラー発生時**: テストが失敗した際の画面状態
+- **各ステップ**: 設定により主要な操作ごとに撮影可能
+
+スクリーンショットファイルは `screenshots/` ディレクトリに保存されます：
+```
+screenshots/
+├── {session-id}/
+│   ├── iteration-1/
+│   │   ├── TC001-before-click.png
+│   │   ├── TC001-after-click.png
+│   │   └── TC002-error-state.png
+│   └── iteration-2/
+│       └── ...
+```
+
+メタデータファイル（`screenshot-metadata-*.json`）には以下が記録されます：
+- スクリーンショットのパス
+- 撮影タイミング（ステップ、エラー時など）
+- タイムスタンプ
+- テストケースID
+- イテレーション番号
 
 これにより、以下を確認できます：
 1. **どんなテストを考えたか** → Planner生成物

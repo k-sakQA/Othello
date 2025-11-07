@@ -33,14 +33,21 @@ class ArtifactStorage {
 
   /**
    * スクリーンショットディレクトリを確保
+   * @param {number} iteration - イテレーション番号
+   * @param {string} testCaseId - テストケースID
+   * @returns {string} スクリーンショットディレクトリのパス
    */
-  ensureScreenshotDir() {
-    // 全イテレーションのディレクトリを確保するため、親ディレクトリを作成
-    const screenshotBaseDir = path.join(this.outputDir, 'screenshots', this.sessionId);
-    if (!fs.existsSync(screenshotBaseDir)) {
-      fs.mkdirSync(screenshotBaseDir, { recursive: true });
+  ensureScreenshotDir(iteration, testCaseId) {
+    const screenshotDir = path.join(
+      this.outputDir, 
+      'screenshots', 
+      this.sessionId || 'default',
+      `iteration-${iteration}`
+    );
+    if (!fs.existsSync(screenshotDir)) {
+      fs.mkdirSync(screenshotDir, { recursive: true });
     }
-    return screenshotBaseDir;
+    return screenshotDir;
   }
 
   /**
@@ -95,13 +102,53 @@ class ArtifactStorage {
    * スクリーンショットのパスを生成
    * @param {number} iteration - イテレーション番号
    * @param {string} testCaseId - テストケースID
-   * @param {string} stepName - ステップ名
+   * @param {string|number} stepName - ステップ名またはステップ番号
    * @returns {string} スクリーンショットファイルパス
    */
   getScreenshotPath(iteration, testCaseId, stepName) {
-    const screenshotDir = path.join(this.outputDir, 'screenshots', this.sessionId, `iteration-${iteration}`);
-    const filename = `${testCaseId}-${stepName}.png`;
+    // ステップ番号の場合は"step-N"に変換
+    const label = typeof stepName === 'number' ? `step-${stepName}` : stepName;
+    
+    // 特殊文字をサニタイズ
+    const sanitizedLabel = label.replace(/[/\\?%*:|"<>]/g, '-');
+    
+    const screenshotDir = path.join(
+      this.outputDir, 
+      'screenshots', 
+      this.sessionId || 'default',
+      `iteration-${iteration}`
+    );
+    const filename = `${testCaseId}-${sanitizedLabel}.png`;
     return path.join(screenshotDir, filename);
+  }
+
+  /**
+   * スクリーンショットのメタデータを保存
+   * @param {number} iteration - イテレーション番号
+   * @param {string} testCaseId - テストケースID
+   * @param {Object} metadata - メタデータ
+   * @returns {Promise<string>} 保存されたファイルパス
+   */
+  async saveScreenshotMetadata(iteration, testCaseId, metadata) {
+    // ディレクトリを確保
+    if (!fs.existsSync(this.outputDir)) {
+      fs.mkdirSync(this.outputDir, { recursive: true });
+    }
+    
+    const timestamp = Date.now();
+    const filename = `screenshot-metadata-${testCaseId}-${metadata.stepLabel}-${timestamp}.json`;
+    const filePath = path.join(this.outputDir, filename);
+    
+    const data = {
+      ...metadata,
+      sessionId: this.sessionId,
+      savedAt: new Date().toISOString()
+    };
+    
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    this.screenshots.push(filePath);
+    
+    return filePath;
   }
 
   /**
@@ -110,6 +157,39 @@ class ArtifactStorage {
    */
   recordScreenshot(screenshotPath) {
     this.screenshots.push(screenshotPath);
+  }
+
+  /**
+   * イテレーションのスクリーンショットサマリーを取得
+   * @param {number} iteration - イテレーション番号
+   * @returns {Object} サマリー情報
+   */
+  getScreenshotSummary(iteration) {
+    // メタデータファイルを検索
+    const metadataFiles = fs.existsSync(this.outputDir) 
+      ? fs.readdirSync(this.outputDir).filter(f => f.startsWith('screenshot-metadata-'))
+      : [];
+    
+    const testCases = new Set();
+    let totalScreenshots = 0;
+    
+    for (const file of metadataFiles) {
+      try {
+        const content = JSON.parse(fs.readFileSync(path.join(this.outputDir, file), 'utf-8'));
+        if (content.iteration === iteration) {
+          testCases.add(content.testCaseId);
+          totalScreenshots++;
+        }
+      } catch (error) {
+        // ファイル読み込みエラーは無視
+      }
+    }
+    
+    return {
+      iteration,
+      totalScreenshots,
+      testCases: Array.from(testCases).sort()
+    };
   }
 
   /**
