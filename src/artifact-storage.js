@@ -57,7 +57,21 @@ class ArtifactStorage {
    * @returns {Promise<string>} 保存されたファイルパス
    */
   async savePlannerOutput(iteration, plannerOutput) {
-    const filename = `planner-iteration-${iteration}-${this.sessionId}.json`;
+    // ファイル名に追加情報を含める（上書き防止）
+    let filenameParts = [`planner-iteration-${iteration}`];
+    
+    if (plannerOutput.targetAspectId) {
+      filenameParts.push(`aspect-${plannerOutput.targetAspectId}`);
+    }
+    if (plannerOutput.specificTest) {
+      filenameParts.push('specific');
+    }
+    if (plannerOutput.deeperTest) {
+      filenameParts.push('deeper');
+    }
+    
+    filenameParts.push(this.sessionId);
+    const filename = `${filenameParts.join('-')}.json`;
     const filePath = path.join(this.outputDir, filename);
     
     const data = {
@@ -81,7 +95,21 @@ class ArtifactStorage {
    * @returns {Promise<string>} 保存されたファイルパス
    */
   async saveGeneratorOutput(iteration, testCaseId, generatorOutput) {
-    const filename = `generator-iteration-${iteration}-${testCaseId}-${this.sessionId}.json`;
+    // ファイル名に追加情報を含める（上書き防止）
+    let filenameParts = [`generator-iteration-${iteration}`, testCaseId];
+    
+    if (generatorOutput.targetAspectId) {
+      filenameParts.push(`aspect-${generatorOutput.targetAspectId}`);
+    }
+    if (generatorOutput.specificTest) {
+      filenameParts.push('specific');
+    }
+    if (generatorOutput.deeperTest) {
+      filenameParts.push('deeper');
+    }
+    
+    filenameParts.push(this.sessionId);
+    const filename = `${filenameParts.join('-')}.json`;
     const filePath = path.join(this.outputDir, filename);
     
     const data = {

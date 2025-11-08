@@ -521,6 +521,16 @@ class Orchestrator {
       const testPlan = await this.planner.generateTestPlan(plannerOptions);
       iterationResults.testCases = testPlan.testCases;
 
+      // 💾 Plannerの生成物を保存（対話モード特定テスト用）
+      await this.artifactStorage.savePlannerOutput(this.iteration, {
+        iteration: this.iteration,
+        testCases: testPlan.testCases,
+        currentCoverage,
+        targetAspectId: recommendation.aspectId,
+        specificTest: true,
+        timestamp: new Date().toISOString()
+      });
+
       // 2. Generator: テストコードを生成
       const snapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
       const generatedTests = await this.generator.generate({
@@ -539,6 +549,22 @@ class Orchestrator {
           coverage: null,
           error: 'No valid test cases generated'
         };
+      }
+
+      // 💾 Generatorの生成物を保存（各テストケースごと）
+      for (const testCase of generatedTests) {
+        await this.artifactStorage.saveGeneratorOutput(
+          this.iteration,
+          testCase.test_case_id,
+          {
+            iteration: this.iteration,
+            testCaseId: testCase.test_case_id,
+            generatedTests: [testCase],
+            targetAspectId: recommendation.aspectId,
+            specificTest: true,
+            timestamp: new Date().toISOString()
+          }
+        );
       }
 
       // 3. Executor: テストを実行（+ Healer: 必要に応じて修復）
@@ -655,6 +681,14 @@ class Orchestrator {
       });
       iterationResults.testCases = deeperTestPlan.testCases;
 
+      // 💾 Plannerの生成物を保存（より深いテスト用）
+      await this.artifactStorage.savePlannerOutput(iterationResults.iteration, {
+        iteration: iterationResults.iteration,
+        testCases: deeperTestPlan.testCases,
+        deeperTest: true,
+        timestamp: new Date().toISOString()
+      });
+
       // 2. Generator: テストコードを生成
       const snapshot = this.playwrightMCP ? await this.playwrightMCP.snapshot() : null;
       const generatedTests = await this.generator.generate({
@@ -673,6 +707,21 @@ class Orchestrator {
           coverage: null,
           error: 'No valid deeper test cases generated'
         };
+      }
+
+      // 💾 Generatorの生成物を保存（各テストケースごと）
+      for (const testCase of generatedTests) {
+        await this.artifactStorage.saveGeneratorOutput(
+          iterationResults.iteration,
+          testCase.test_case_id,
+          {
+            iteration: iterationResults.iteration,
+            testCaseId: testCase.test_case_id,
+            generatedTests: [testCase],
+            deeperTest: true,
+            timestamp: new Date().toISOString()
+          }
+        );
       }
 
       // 3. Executor: テストを実行
