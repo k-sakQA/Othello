@@ -292,10 +292,14 @@ class OthelloExecutor {
         fs.mkdirSync(dir, { recursive: true });
       }
       
-      console.log(`\n📸 Attempting to capture screenshot for ${testCaseId}...`);
-      console.log(`   Path: ${absolutePath}`);
+      // MCP Serverは相対パスのみを受け付ける（セキュリティ制限）
+      // 相対パスでファイル名を生成
+      const relativeFilename = `othello-${testCaseId}-error-${instructionIndex}-${timestamp}.png`;
       
-      const screenshotResult = await this.playwrightMCP.screenshot(absolutePath);
+      console.log(`\n📸 Attempting to capture screenshot for ${testCaseId}...`);
+      console.log(`   Relative filename for MCP: ${relativeFilename}`);
+      
+      const screenshotResult = await this.playwrightMCP.screenshot(relativeFilename);
       
       // スクリーンショットが成功したか確認
       if (!screenshotResult || !screenshotResult.success) {
@@ -304,7 +308,9 @@ class OthelloExecutor {
         console.error(`   Result:`, JSON.stringify(screenshotResult, null, 2));
         console.error(`========================================\n`);
       } else {
-        console.log(`✅ Screenshot saved successfully: ${absolutePath}\n`);
+        console.log(`✅ Screenshot saved by MCP Server to its output directory`);
+        console.log(`   Check MCP temp directory: C:\\Users\\k_sak\\AppData\\Local\\Temp\\playwright-mcp-output\\`);
+        console.log(`   Filename: ${relativeFilename}\n`);
       }
       
       // メタデータを保存
@@ -314,7 +320,10 @@ class OthelloExecutor {
         instruction_type: instructionType,
         error_message: errorMessage,
         screenshot_path: screenshotPath,
+        screenshot_filename: relativeFilename,
         screenshot_success: screenshotResult?.success || false,
+        mcp_temp_dir: 'C:\\Users\\k_sak\\AppData\\Local\\Temp\\playwright-mcp-output\\',
+        mcp_note: 'Screenshot is saved in MCP Server temp directory, not in Othello reports/',
         timestamp: new Date().toISOString()
       });
     } catch (error) {
