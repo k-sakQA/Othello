@@ -120,11 +120,18 @@ cp your-specification.md spec/
 **Step 2: Othello実行**
 ```bash
 # 仕様書から自動テスト分析・実行
-node bin/othello.js --url https://hotel.example.com
+```bash
+node bin/othello.js --url https://your-website.example.com
+```
+
+詳細オプション付き:
+```bash
+node bin/othello.js \
+  --url https://your-website.example.com \
 
 # カスタム設定
 node bin/othello.js \
-  --url https://hotel.example.com \
+  --url https://your-website.example.com \
   --max-iterations 10 \
   --coverage-target 90 \
   --output-dir ./my-reports
@@ -145,14 +152,14 @@ node bin/othello.js \
 
 ```bash
 # 基本的な使い方
-othello --url https://hotel.example.com
+othello --url https://your-website.example.com
 
 # 対話モードで実行（推奨テストを選択可能）
-othello --url https://hotel.example.com --interactive
+othello --url https://your-website.example.com --interactive
 
 # カスタム設定
 othello \
-  --url https://hotel.example.com \
+  --url https://your-website.example.com \
   --max-iterations 10 \
   --coverage-target 90 \
   --output-dir ./my-reports
@@ -202,7 +209,7 @@ const Orchestrator = require('./src/orchestrator');
 
 // Orchestratorインスタンス作成
 const orchestrator = new Orchestrator({
-  url: 'https://hotel.example.com',
+  url: 'https://your-website.example.com',
   maxIterations: 10,
   coverageTarget: 80,
   autoHeal: true,
@@ -228,7 +235,7 @@ const snapshot = await othello.mcpClient.snapshot();
 await othello.mcpClient.callTool('browser_type', {
   ref: 'e16',
   text: '2025-10-27',
-  intent: '宿泊日を入力'
+  intent: 'チェックボックスを選択'
 });
 
 // セッションクローズ
@@ -333,20 +340,20 @@ spec/
 ### 仕様書の記載例
 
 ```markdown
-# ホテル予約システム 仕様書
+# Webアプリケーション 仕様書（例）
 
 ## 1. 概要
-本システムは、ユーザーがオンラインでホテルの宿泊プランを予約できるWebアプリケーションです。
+本システムは、ユーザーがオンラインでサービスを利用できるWebアプリケーションです。
 
 ## 2. 機能仕様
 
-### 2.1 宿泊予約機能
+### 2.1 フォーム入力機能
 
-**URL**: https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0
+**URL**: https://your-website.example.com/form.html
 
 **入力項目:**
-- 宿泊日（必須）: カレンダーから選択
-- 宿泊数（必須）: 1～9泊から選択
+- 日付（必須）: カレンダーから選択
+- 数量（必須）: 1～9から選択
 - 人数（必須）: 1～9名から選択
 - 氏名（必須）: 全角文字、1～50文字
 
@@ -355,8 +362,10 @@ spec/
 - エラーメッセージ: 「このフィールドを入力してください。」
 
 ## 3. 画面遷移
-予約入力画面 → 予約確認画面 → 予約完了画面
+入力画面 → 確認画面 → 完了画面
 ```
+
+**注**: 上記は一般的なフォーム入力の例です。実際のウェブサイトに合わせてテスト仕様を作成してください。仕様書のサンプルは `spec/` フォルダを参照してください。
 
 ### テスト分析のフロー
 
@@ -393,16 +402,18 @@ Executor実行 → Healer修復 → Analyzer分析
 
 ```bash
 node bin/othello.js \
-  --url https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0 \
-  --test-aspects-csv "docs/hotel-site-test-matrix.csv"
+  --url https://your-website.example.com \
+  --test-aspects-csv "config/test-aspects-custom.csv"
 ```
 
-`docs/hotel-site-test-matrix.csv`には以下が含まれます：
+テスト観点CSVには以下を含めることができます：
 - 品質特性（表示・入力・動作確認・状態遷移など）
 - テストタイプ（レイアウト・エラー表示・文字種・数値など）
-- ホテル予約サイト固有の仕様例
+- 対象システム固有の仕様例（例: フォーム入力制約、画面遷移パターン）
 - 狙うバグ（欠陥仮定）
 - 優先度（P0/P1/P2/P3）
+
+**参考例**: ウェブサイトテスト向けの観点CSVサンプルは `docs/hotel-site-test-matrix.csv` にあります。
 
 ### 保存される成果物
 
@@ -514,11 +525,19 @@ npx @playwright/mcp@latest --browser chromium
 
 # Step 4: Othello実行
 node bin/othello.js \
-  --url "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0" \
+  --url "https://your-website.example.com" \
   --max-iterations 5 \
   --coverage-target 90 \
   --llm-provider openai \
   --verbose
+
+# 実例: ウェブサイトのテスト
+# node bin/othello.js \
+#   --url "https://your-website.example.com/page" \
+#   --max-iterations 5 \
+#   --coverage-target 90 \
+#   --llm-provider openai \
+#   --verbose
 
 # Step 5: レポート確認
 cat reports/final-report.json
@@ -567,7 +586,7 @@ node bin/othello.js --url https://example.com --llm-provider mock
 ```bash
 # 最初は1イテレーションだけ実行し、その後対話的に選択
 node bin/othello.js \
-  --url "https://hotel-example-site.takeyaqa.dev/ja/reserve.html?plan-id=0" \
+  --url "https://your-website.example.com" \
   --max-iterations 1 \
   --llm-provider openai \
   --interactive

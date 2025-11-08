@@ -281,8 +281,18 @@ class OthelloExecutor {
       // スクリーンショットパスを取得
       const screenshotPath = this.artifactStorage.getScreenshotPath(iteration, testCaseId, stepName);
       
-      // スクリーンショットを撮影
-      await this.playwrightMCP.screenshot(screenshotPath);
+      // スクリーンショットを撮影（絶対パスで保存）
+      const fs = require('fs');
+      const path = require('path');
+      const absolutePath = path.resolve(screenshotPath);
+      
+      // 親ディレクトリが存在することを確認
+      const dir = path.dirname(absolutePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
+      await this.playwrightMCP.screenshot(absolutePath);
       
       // メタデータを保存
       await this.artifactStorage.saveScreenshotMetadata(iteration, testCaseId, {
