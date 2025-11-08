@@ -59,8 +59,14 @@ class OthelloGenerator {
           { role: 'user', content: prompt }
         ],
         temperature: 0.1,
-        maxTokens: 3000
+        maxTokens: 4096
       });
+
+      // Debug: Log LLM response
+      console.log(`\n[Generator] LLM Response for ${testCase.test_case_id}:`);
+      console.log(`  Length: ${response.content.length} chars`);
+      console.log(`  First 500 chars: ${response.content.substring(0, 500)}...`);
+      console.log(`  Finish Reason: ${response.finishReason || 'N/A'}\n`);
 
       const parsed = this.parseGenerationResponse(response.content);
       
@@ -145,7 +151,8 @@ ${snapshotFormatted}
 必ず Snapshot に表示されている ref の値を使用してください。
 
 【出力形式】
-JSON配列で出力してください：
+以下の形式のJSON配列で出力してください。
+**CRITICAL: test_case_id must be exactly "${testCase.test_case_id || testCase.case_id}" (DO NOT MODIFY)**
 
 \`\`\`json
 [
@@ -181,12 +188,14 @@ JSON配列で出力してください：
 \`\`\`
 
 **重要な制約:**
+- **CRITICAL: test_case_id MUST be exactly "${testCase.test_case_id || testCase.case_id}" (NEVER CHANGE IT)**
 - 必ず有効なJSON構文で出力してください（末尾カンマ禁止、コメント禁止）
 - 文字列は必ずダブルクォート(")で囲んでください
 - description内の改行は\\nでエスケープしてください
-- refはSnapshot内に存在するもの（e16, e22, e48, e52, e59など）のみ使用してください
+- **CRITICAL: ref must exist in Snapshot (e16, e22, e48, e52, e59, etc). Invalid ref = validation error**
 - 各命令にはdescriptionを必ず含めてください
 - テスト手順と期待結果を忠実に反映してください
+- **CRITICAL: All instructions must have both "type" and "description" fields**
 `;
   }
 
