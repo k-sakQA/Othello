@@ -737,15 +737,22 @@ class Othello {
       }
 
       // MCPツールを呼び出し
+      console.log(`🔧 [PlaywrightAgent] Calling MCP browser_take_screenshot...`);
+      console.log(`   filename: ${filename}`);
+      console.log(`   fullPage: ${options.fullPage || false}`);
+      
       const mcpResult = await this.mcpClient.callTool('browser_take_screenshot', {
         filename,
         fullPage: options.fullPage || false,
         type: options.type || 'png'
       });
 
+      console.log(`🔧 [PlaywrightAgent] MCP Result:`, JSON.stringify(mcpResult, null, 2));
+
       await this.logExecution('info', 'screenshot', {
         filename,
-        success: mcpResult.success
+        success: mcpResult.success,
+        result: mcpResult
       });
 
       return mcpResult;

@@ -64,14 +64,18 @@ class OthelloGenerator {
 
       const parsed = this.parseGenerationResponse(response.content);
       
-      // 命令の検証
+      // 命令の検証（無効な命令を持つテストケースは除外）
+      const validTests = [];
       for (const result of parsed) {
         if (!this.validateInstructions(result.instructions)) {
-          console.warn(`Invalid instructions for ${result.test_case_id}`);
+          console.warn(`⚠️  Invalid instructions for ${result.test_case_id} - スキップします`);
+          console.warn(`   Instructions:`, JSON.stringify(result.instructions, null, 2));
+        } else {
+          validTests.push(result);
         }
       }
 
-      allInstructions.push(...parsed);
+      allInstructions.push(...validTests);
     }
 
     return allInstructions;

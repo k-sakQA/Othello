@@ -120,9 +120,43 @@ class OthelloReporter {
     lines.push('---');
     lines.push('');
 
-    // 実行結果詳細
+    // イテレーション詳細
+    if (testData.history && testData.history.length > 0) {
+      lines.push('## 🔄 イテレーション詳細');
+      lines.push('');
+      
+      testData.history.forEach((iter, index) => {
+        lines.push(`### Iteration ${index + 1}`);
+        lines.push('');
+        lines.push(`- **実行時刻**: ${this.formatTimestamp(new Date(iter.timestamp))}`);
+        lines.push(`- **テストケース数**: ${iter.executionResults.length}`);
+        lines.push(`- **成功**: ${iter.executionResults.filter(r => r.success).length} / **失敗**: ${iter.executionResults.filter(r => !r.success).length}`);
+        
+        if (iter.coverage) {
+          lines.push(`- **カバレッジ**: ${iter.coverage.percentage}% (${iter.coverage.covered}/${iter.coverage.total} 観点)`);
+        }
+        
+        lines.push('');
+        lines.push('| テストケースID | 観点 | 結果 | 実行時間 |');
+        lines.push('|---------------|------|------|----------|');
+        
+        iter.executionResults.forEach(result => {
+          const status = result.success ? '✅ 成功' : '❌ 失敗';
+          const duration = result.duration_ms ? this.formatDuration(result.duration_ms) : '-';
+          const aspectNo = result.aspect_no || '-';
+          lines.push(`| ${result.test_case_id} | ${aspectNo} | ${status} | ${duration} |`);
+        });
+        
+        lines.push('');
+      });
+      
+      lines.push('---');
+      lines.push('');
+    }
+
+    // 全実行結果サマリー
     if (executionResults && executionResults.length > 0) {
-      lines.push('## 📝 実行結果詳細');
+      lines.push('## 📝 全実行結果サマリー');
       lines.push('');
       lines.push('| テストケースID | 観点 | 結果 | 実行時間 | エラー |');
       lines.push('|---------------|------|------|----------|--------|');
@@ -408,8 +442,52 @@ class OthelloReporter {
       ${(aspectCoverage.untested_aspects || []).map(n => `<span class="aspect-badge untested">${n}</span>`).join('') || 'なし'}
     </div>
     
+    ${testData.history && testData.history.length > 0 ? `
+    <h2>🔄 イテレーション詳細</h2>
+    ${testData.history.map((iter, index) => `
+      <div style="margin-bottom: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+        <h3>Iteration ${index + 1}</h3>
+        <p><strong>実行時刻:</strong> ${this.formatTimestamp(new Date(iter.timestamp))}</p>
+        <p><strong>テストケース数:</strong> ${iter.executionResults.length}</p>
+        <p><strong>成功:</strong> ${iter.executionResults.filter(r => r.success).length} / 
+           <strong>失敗:</strong> ${iter.executionResults.filter(r => !r.success).length}</p>
+        ${iter.coverage ? `
+          <p><strong>カバレッジ:</strong> ${iter.coverage.percentage}% 
+          (${iter.coverage.covered}/${iter.coverage.total} 観点)</p>
+        ` : ''}
+        <details style="margin-top: 10px;">
+          <summary style="cursor: pointer; font-weight: bold;">テストケース詳細を表示</summary>
+          <table style="margin-top: 10px;">
+            <thead>
+              <tr>
+                <th>テストケースID</th>
+                <th>観点</th>
+                <th>結果</th>
+                <th>実行時間</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${iter.executionResults.map(result => `
+              <tr>
+                <td>${result.test_case_id}</td>
+                <td>${result.aspect_no || '-'}</td>
+                <td>
+                  ${result.success 
+                    ? '<span class="badge badge-success">✅ 成功</span>' 
+                    : '<span class="badge badge-danger">❌ 失敗</span>'}
+                </td>
+                <td>${result.duration_ms ? this.formatDuration(result.duration_ms) : '-'}</td>
+              </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </details>
+      </div>
+    `).join('')}
+    ` : ''}
+    
     ${executionResults && executionResults.length > 0 ? `
-    <h2>📝 実行結果詳細</h2>
+    <h2>📝 全実行結果サマリー</h2>
     
     <table>
       <thead>

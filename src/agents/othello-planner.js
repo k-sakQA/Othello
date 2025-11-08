@@ -90,19 +90,35 @@ class OthelloPlanner {
   }
 
   async generateTestPlan(options) {
-    const { url, testAspectsCSV, existingCoverage, uncoveredAspects, iteration = 1, specDir } = options;
+    const { url, testAspectsCSV, existingCoverage, uncoveredAspects, iteration = 1, specDir, targetAspectId } = options;
     
     // 仕様書を読み込む
     const specifications = await this.loadSpecifications(specDir || './spec');
     
     const aspects = await this.loadTestAspects(testAspectsCSV);
-    const priorityAspects = this.prioritizeAspects(aspects, existingCoverage || {}, uncoveredAspects);
+    
+    // targetAspectIdが指定されている場合は、その観点のみに絞る
+    let priorityAspects;
+    if (targetAspectId !== undefined && targetAspectId !== null) {
+      priorityAspects = aspects.filter(a => a.aspect_no == targetAspectId);
+      if (priorityAspects.length === 0) {
+        console.warn(`⚠️  指定された観点 No.${targetAspectId} が見つかりません`);
+        // フォールバック: 全観点から優先順位付け
+        priorityAspects = this.prioritizeAspects(aspects, existingCoverage || {}, uncoveredAspects);
+      } else {
+        console.log(`🎯 観点 No.${targetAspectId} に絞ってテスト計画を生成します`);
+      }
+    } else {
+      priorityAspects = this.prioritizeAspects(aspects, existingCoverage || {}, uncoveredAspects);
+    }
+    
     const analysis = await this.analyzeWithLLM({ 
       url, 
       aspects: priorityAspects, 
       existingCoverage, 
       iteration,
-      specifications 
+      specifications,
+      targetAspectId 
     });
     
     const testCases = this.extractTestCases(analysis);
@@ -112,8 +128,8 @@ class OthelloPlanner {
   }
 
   async analyzeWithLLM(options) {
-    const { url, aspects, existingCoverage, iteration, specifications } = options;
-    const prompt = this.buildAnalysisPrompt({ url, aspects, existingCoverage, iteration, specifications });
+    const { url, aspects, existingCoverage, iteration, specifications, targetAspectId } = options;
+    const prompt = this.buildAnalysisPrompt({ url, aspects, existingCoverage, iteration, specifications, targetAspectId });
     
     const response = await this.llm.chat({
       messages: [
@@ -127,8 +143,13 @@ class OthelloPlanner {
     return this.parseAnalysisResponse(response.content);
   }
 
-  buildAnalysisPrompt({ url, aspects, existingCoverage, iteration, specifications }) {
+  buildAnalysisPrompt({ url, aspects, existingCoverage, iteration, specifications, targetAspectId }) {
     const aspectsList = aspects.map(a => `No.${a.aspect_no}: ${a.test_type_major}${a.test_type_minor ? ' - ' + a.test_type_minor : ''}\n観点: ${a.test_aspect}`).join('\n\n');
+    
+    // targetAspectIdが指定されている場合の特別なメッセージ
+    const targetAspectMessage = targetAspectId !== undefined && targetAspectId !== null
+      ? `\n\n【重要】今回は観点 No.${targetAspectId} のテストケースのみを生成してください。他の観点は無視してください。`
+      : '';
     
     // 仕様書がある場合とない場合で分岐
     if (specifications) {
@@ -147,7 +168,7 @@ ${existingCoverage ? JSON.stringify(existingCoverage, null, 2) : 'なし'}
 ${specifications}
 
 【テスト観点リスト】（優先度順）
-${aspectsList}
+${aspectsList}${targetAspectMessage}
 
 【タスク】
 **仕様書**を読んで、各テスト観点について日本語でテスト分析を行ってください：
@@ -197,7 +218,7 @@ ${iteration}回目
 ${existingCoverage ? JSON.stringify(existingCoverage, null, 2) : 'なし'}
 
 【テスト観点リスト】（優先度順）
-${aspectsList}
+${aspectsList}${targetAspectMessage}
 
 【タスク】
 各テスト観点について、以下を分析してください：

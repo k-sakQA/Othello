@@ -294,10 +294,12 @@ describe('Orchestrator', () => {
         }
       ];
 
-      mockAnalyzer.analyzeWithHistory.mockReturnValue({
-        cumulativeCoverage: {
-          aspectCoverage: { percentage: 50 }
-        }
+      mockAnalyzer.analyze.mockResolvedValue({
+        aspectCoverage: { percentage: 50, tested: 5, total: 10, tested_aspects: [1,2,3,4,5], untested_aspects: [6,7,8,9,10] },
+        testCaseCoverage: { passed: 1, total: 1, failed: 0, pass_rate: 100 },
+        percentage: 50,
+        covered: 5,
+        total: 10
       });
 
       mockReporter.saveAllReports.mockResolvedValue({
@@ -308,8 +310,13 @@ describe('Orchestrator', () => {
 
       const reports = await orchestrator.generateFinalReport();
 
-      expect(mockAnalyzer.analyzeWithHistory).toHaveBeenCalled();
+      expect(mockAnalyzer.analyze).toHaveBeenCalled();
       expect(mockReporter.saveAllReports).toHaveBeenCalled();
+      
+      // reportDataにhistoryが含まれていることを確認
+      const reportData = mockReporter.saveAllReports.mock.calls[0][0];
+      expect(reportData.history).toBeDefined();
+      expect(reportData.history).toEqual(orchestrator.history);
       expect(reports.json).toBe('report.json');
       expect(reports.markdown).toBe('report.md');
       expect(reports.html).toBe('report.html');

@@ -194,6 +194,15 @@ class Orchestrator {
         url: this.config.url 
       });
       
+      // Generatorが有効なテストを生成できなかった場合
+      if (!generatedTests || generatedTests.length === 0) {
+        console.warn(`⚠️  Generatorが有効なテストケースを生成できませんでした（イテレーション ${this.iteration}）`);
+        iterationResults.executionResults = [];
+        iterationResults.coverage = await this.analyzer.analyze([]);
+        this.history.push(iterationResults);
+        return iterationResults;
+      }
+      
       // 💾 Generatorの生成物を保存（各テストケースごと）
       for (const testCase of generatedTests) {
         await this.artifactStorage.saveGeneratorOutput(
@@ -344,7 +353,8 @@ class Orchestrator {
       totalDuration: this.endTime - this.startTime,
       iterations: this.iteration,
       coverage: finalCoverage,
-      executionResults: allResults
+      executionResults: allResults,
+      history: this.history // 各イテレーションの詳細を追加
     };
     const reports = await this.reporter.saveAllReports(reportData, `session-${this.sessionId}`);
     return reports;
@@ -519,6 +529,18 @@ class Orchestrator {
         url: this.config.url
       });
 
+      // Generatorが有効なテストを生成できなかった場合
+      if (!generatedTests || generatedTests.length === 0) {
+        console.warn(`⚠️  Generatorが有効なテストケースを生成できませんでした`);
+        return {
+          success: false,
+          testCases: testPlan.testCases,
+          executionResults: [],
+          coverage: null,
+          error: 'No valid test cases generated'
+        };
+      }
+
       // 3. Executor: テストを実行（+ Healer: 必要に応じて修復）
       for (const testCase of generatedTests) {
         const result = await this.executor.execute(testCase);
@@ -640,6 +662,18 @@ class Orchestrator {
         snapshot,
         url: this.config.url
       });
+
+      // Generatorが有効なテストを生成できなかった場合
+      if (!generatedTests || generatedTests.length === 0) {
+        console.warn(`⚠️  Generatorが有効な深いテストケースを生成できませんでした`);
+        return {
+          success: false,
+          testCases: deeperTestPlan.testCases,
+          executionResults: [],
+          coverage: null,
+          error: 'No valid deeper test cases generated'
+        };
+      }
 
       // 3. Executor: テストを実行
       for (const testCase of generatedTests) {

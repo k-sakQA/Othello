@@ -292,7 +292,20 @@ class OthelloExecutor {
         fs.mkdirSync(dir, { recursive: true });
       }
       
-      await this.playwrightMCP.screenshot(absolutePath);
+      console.log(`\n📸 Attempting to capture screenshot for ${testCaseId}...`);
+      console.log(`   Path: ${absolutePath}`);
+      
+      const screenshotResult = await this.playwrightMCP.screenshot(absolutePath);
+      
+      // スクリーンショットが成功したか確認
+      if (!screenshotResult || !screenshotResult.success) {
+        console.error(`\n❌ ========================================`);
+        console.error(`   Screenshot capture FAILED for ${testCaseId}`);
+        console.error(`   Result:`, JSON.stringify(screenshotResult, null, 2));
+        console.error(`========================================\n`);
+      } else {
+        console.log(`✅ Screenshot saved successfully: ${absolutePath}\n`);
+      }
       
       // メタデータを保存
       await this.artifactStorage.saveScreenshotMetadata(iteration, testCaseId, {
@@ -301,11 +314,13 @@ class OthelloExecutor {
         instruction_type: instructionType,
         error_message: errorMessage,
         screenshot_path: screenshotPath,
+        screenshot_success: screenshotResult?.success || false,
         timestamp: new Date().toISOString()
       });
     } catch (error) {
       // スクリーンショット撮影のエラーは無視（テスト実行を妨げない）
-      console.warn('Failed to capture screenshot:', error.message);
+      console.warn('❌ Failed to capture screenshot:', error.message);
+      console.warn('   Error details:', error);
     }
   }
 
