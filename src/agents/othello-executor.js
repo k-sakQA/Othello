@@ -348,11 +348,36 @@ class OthelloExecutor {
         sanitized[key] = `[omitted base64: ${value.length} chars]`;
       } else if (typeof value === 'object' && value !== null) {
         sanitized[key] = this.sanitizeMcpResult(value);
+      } else if (typeof value === 'string') {
+        sanitized[key] = this.sanitizePotentialBase64String(value);
       } else {
         sanitized[key] = value;
       }
     }
     return sanitized;
+  }
+
+  sanitizePotentialBase64String(value) {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    const base64KeyPattern = /(imageBase64\s*:\s*)([A-Za-z0-9+/=\r\n]+)/gi;
+    if (base64KeyPattern.test(value)) {
+      base64KeyPattern.lastIndex = 0;
+      return value.replace(base64KeyPattern, (_, prefix, data) => {
+        const length = data.replace(/\s+/g, '').length;
+        return `${prefix}[omitted base64: ${length} chars]`;
+      });
+    }
+
+    const compact = value.replace(/\s+/g, '');
+    const looksLikeBase64 = compact.length > 512 && /^[A-Za-z0-9+/=]+$/.test(compact);
+    if (looksLikeBase64) {
+      return `[omitted base64 blob: ${compact.length} chars]`;
+    }
+
+    return value;
   }
 
   /**

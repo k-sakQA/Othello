@@ -34,6 +34,7 @@ class Orchestrator {
     this.analyzer = null;
     this.reporter = null;
     this.playwrightMCP = null;
+    this.aspects = null; // テスト観点情報（CSV読み込み用）
     this.artifactStorage = new ArtifactStorage({
       sessionId: this.sessionId,
       outputDir: this.config.outputDir
@@ -51,6 +52,9 @@ class Orchestrator {
     }
     
     try {
+      // テスト観点情報を読み込む（対話モード用）
+      await this.loadAspects();
+      
       if (this.playwrightMCP) {
         await this.playwrightMCP.setupPage(this.config.url);
       }
@@ -74,7 +78,8 @@ class Orchestrator {
           const allResults = this.history.flatMap(h => h.executionResults);
           const recommendations = await this.analyzer.generateRecommendations(
             allResults,
-            currentCoverage
+            currentCoverage,
+            this.aspects
           );
           
           if (recommendations && recommendations.length > 0) {
@@ -377,6 +382,36 @@ class Orchestrator {
   }
 
   /**
+   * テスト観点情報を読み込む
+   */
+  async loadAspects() {
+    try {
+      const fs = require('fs').promises;
+      const { parseCSV } = require('./utils/csv-parser');
+      const csvPath = this.config.testAspectsCSV;
+      const csvContent = await fs.readFile(csvPath, 'utf-8');
+      const rows = parseCSV(csvContent);
+      
+      this.aspects = rows.map((row, index) => {
+        const noValue = row['No'] || row['no'] || row['NO'];
+        const aspectValue = Object.keys(row).find(k => k.includes('テスト観点'));
+        const priorityValue = Object.keys(row).find(k => k.includes('優先度'));
+        
+        return {
+          aspect_no: parseInt(noValue, 10) || index + 1,
+          test_aspect: aspectValue ? row[aspectValue] : '',
+          priority: priorityValue ? row[priorityValue] : 'P2'
+        };
+      }).filter(aspect => aspect.test_aspect);
+      
+      console.log(`✅ テスト観点情報を読み込みました: ${this.aspects.length}件\n`);
+    } catch (error) {
+      console.warn('⚠️  テスト観点情報の読み込みに失敗しました:', error.message);
+      this.aspects = [];
+    }
+  }
+
+  /**
    * 推奨テストを表示
    * @param {Array} recommendations - 推奨テストリスト
    */
@@ -389,6 +424,9 @@ class Orchestrator {
     console.log('\n🎯 次にやるべきテスト:\n');
     recommendations.forEach((rec, index) => {
       console.log(`[${index + 1}] ${rec.title} (${rec.priority})`);
+      if (rec.content) {
+        console.log(`    内容: ${rec.content}`);
+      }
       console.log(`    理由: ${rec.reason}\n`);
     });
     

@@ -252,11 +252,12 @@ class OthelloAnalyzer {
 
   /**
    * 推奨テストリストを生成
-   * @param {Object} coverage - 現在のカバレッジ情報
    * @param {Array} executionResults - 実行結果の配列
+   * @param {Object} coverageData - 現在のカバレッジ情報
+   * @param {Array} aspects - テスト観点情報の配列
    * @returns {Array} 推奨テストの配列
    */
-  async generateRecommendations(executionResults = [], coverageData = {}) {
+  async generateRecommendations(executionResults = [], coverageData = {}, aspects = []) {
     const recommendations = [];
     const maxRecommendations = 5;
     
@@ -274,10 +275,14 @@ class OthelloAnalyzer {
     
     // 失敗したテストを推奨リストに追加
     for (const [aspectId, failedTest] of failedTests) {
+      const aspect = aspects.find(a => a.aspect_no === aspectId);
+      const aspectContent = aspect ? aspect.test_aspect : '';
+      
       recommendations.push({
         type: 'failed',
         priority: 'High',
         title: `失敗したテスト: 観点${aspectId}`,
+        content: aspectContent,
         reason: `前回実行で失敗: ${failedTest.error?.message || 'エラー'}`,
         aspectId: aspectId,
         originalTestCaseId: failedTest.test_case_id,
@@ -296,10 +301,15 @@ class OthelloAnalyzer {
       const topUncovered = uncoveredAspects.slice(0, remainingSlots);
       
       for (const aspectId of topUncovered) {
+        const aspect = aspects.find(a => a.aspect_no === aspectId);
+        const aspectContent = aspect ? aspect.test_aspect : '';
+        const aspectPriority = aspect ? aspect.priority : 'P2';
+        
         recommendations.push({
           type: 'uncovered',
-          priority: 'High',
+          priority: aspectPriority,
           title: `観点${aspectId}のテスト`,
+          content: aspectContent,
           reason: `未カバー観点: 観点${aspectId}`,
           aspectId: aspectId
         });

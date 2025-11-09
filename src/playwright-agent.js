@@ -255,11 +255,39 @@ class Othello {
       }
     }
 
-    // デバッグモード時はコンソールにも出力
+    // デバッグモード時はコンソールにも出力（base64データはサニタイズ）
     if (this.debugMode) {
       const prefix = `[${level.toUpperCase()}] [${action}]`;
-      console.log(`${prefix}:`, JSON.stringify(data, null, 2));
+      const sanitizedData = this.sanitizeMcpResult(data);
+      console.log(`${prefix}:`, JSON.stringify(sanitizedData, null, 2));
     }
+  }
+
+  /**
+   * MCPレスポンスからbase64データをサニタイズ
+   * @param {*} payload - サニタイズ対象のデータ
+   * @returns {*} サニタイズ後のデータ
+   */
+  sanitizeMcpResult(payload) {
+    if (!payload || typeof payload !== 'object') {
+      return payload;
+    }
+
+    if (Array.isArray(payload)) {
+      return payload.map(item => this.sanitizeMcpResult(item));
+    }
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (typeof value === 'string' && key.toLowerCase().includes('base64')) {
+        sanitized[key] = `[omitted base64: ${value.length} chars]`;
+      } else if (typeof value === 'object' && value !== null) {
+        sanitized[key] = this.sanitizeMcpResult(value);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+    return sanitized;
   }
 
   /**
@@ -786,11 +814,36 @@ class Othello {
         sanitized[key] = `[omitted base64: ${value.length} chars]`;
       } else if (typeof value === 'object' && value !== null) {
         sanitized[key] = this.sanitizeMcpPayload(value);
+      } else if (typeof value === 'string') {
+        sanitized[key] = this.sanitizePotentialBase64String(value);
       } else {
         sanitized[key] = value;
       }
     }
     return sanitized;
+  }
+
+  sanitizePotentialBase64String(value) {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    const base64KeyPattern = /(imageBase64\s*:\s*)([A-Za-z0-9+/=\r\n]+)/gi;
+    if (base64KeyPattern.test(value)) {
+      base64KeyPattern.lastIndex = 0;
+      return value.replace(base64KeyPattern, (_, prefix, data) => {
+        const length = data.replace(/\s+/g, '').length;
+        return `${prefix}[omitted base64: ${length} chars]`;
+      });
+    }
+
+    const compact = value.replace(/\s+/g, '');
+    const looksLikeBase64 = compact.length > 512 && /^[A-Za-z0-9+/=]+$/.test(compact);
+    if (looksLikeBase64) {
+      return `[omitted base64 blob: ${compact.length} chars]`;
+    }
+
+    return value;
   }
 
   /**
