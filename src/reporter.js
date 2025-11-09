@@ -468,7 +468,10 @@ class Reporter {
       ` : '<div style="padding: 10px; background: white; border-radius: 5px; margin-top: 10px; color: #7f8c8d;">テスト内容の詳細情報がありません</div>'}
       ${result.error ? `
       <div style="padding: 10px; background: #f8d7da; border-radius: 5px; margin-top: 10px; color: #721c24;">
-        <strong>エラー:</strong> ${typeof result.error === 'string' ? result.error : (result.error.message || 'エラーメッセージなし')}
+        <strong>エラー:</strong>
+        <pre style="white-space: pre-wrap; margin-top: 8px;">${this.escapeHtml(
+          this.formatErrorMessage(result.error)
+        )}</pre>
       </div>
       ` : ''}
       <div style="padding: 5px 10px; font-size: 0.9em; color: #7f8c8d;">
@@ -575,6 +578,38 @@ class Reporter {
     });
     
     return md;
+  }
+
+  formatErrorMessage(error) {
+    if (!error) {
+      return '-';
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    if (typeof error === 'object') {
+      if (error.message) {
+        return error.message;
+      }
+      try {
+        return JSON.stringify(error, null, 2);
+      } catch (e) {
+        return String(error);
+      }
+    }
+    return String(error);
+  }
+
+  escapeHtml(text) {
+    if (text === null || text === undefined) {
+      return '';
+    }
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 }
 

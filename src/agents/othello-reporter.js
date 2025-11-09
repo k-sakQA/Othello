@@ -478,7 +478,7 @@ class OthelloReporter {
                     : '<span class="badge badge-danger">❌ 失敗</span>'}
                 </td>
                 <td>${result.duration_ms ? this.formatDuration(result.duration_ms) : '-'}</td>
-                <td>${result.error || '-'}</td>
+                <td>${this.formatErrorCell(result.error)}</td>
               </tr>
               `).join('')}
             </tbody>
@@ -512,7 +512,7 @@ class OthelloReporter {
               : '<span class="badge badge-danger">❌ 失敗</span>'}
           </td>
           <td>${result.duration_ms ? this.formatDuration(result.duration_ms) : '-'}</td>
-          <td>${result.error || '-'}</td>
+          <td>${this.formatErrorCell(result.error)}</td>
         </tr>
         `).join('')}
       </tbody>
@@ -674,6 +674,46 @@ class OthelloReporter {
     const seconds = String(now.getSeconds()).padStart(2, '0');
     
     return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+  }
+
+  formatErrorCell(error) {
+    if (!error) {
+      return '-';
+    }
+    const message = this.stringifyError(error);
+    return `<pre style="white-space: pre-wrap; font-size: 12px; max-height: 200px; overflow: auto;">${this.escapeHtml(message)}</pre>`;
+  }
+
+  stringifyError(error) {
+    if (!error) {
+      return '';
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    if (typeof error === 'object') {
+      if (error.message) {
+        return error.message;
+      }
+      try {
+        return JSON.stringify(error, null, 2);
+      } catch (e) {
+        return String(error);
+      }
+    }
+    return String(error);
+  }
+
+  escapeHtml(text) {
+    if (text === null || text === undefined) {
+      return '';
+    }
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 }
 
