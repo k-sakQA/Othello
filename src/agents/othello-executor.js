@@ -305,7 +305,7 @@ class OthelloExecutor {
       if (!screenshotResult || !screenshotResult.success) {
         console.error(`\n❌ ========================================`);
         console.error(`   Screenshot capture FAILED for ${testCaseId}`);
-        console.error(`   Result:`, JSON.stringify(screenshotResult, null, 2));
+        console.error(`   Result:`, JSON.stringify(this.sanitizeMcpResult(screenshotResult), null, 2));
         console.error(`========================================\n`);
       } else {
         console.log(`✅ Screenshot saved by MCP Server to its output directory`);
@@ -331,6 +331,28 @@ class OthelloExecutor {
       console.warn('❌ Failed to capture screenshot:', error.message);
       console.warn('   Error details:', error);
     }
+  }
+
+  sanitizeMcpResult(payload) {
+    if (!payload || typeof payload !== 'object') {
+      return payload;
+    }
+
+    if (Array.isArray(payload)) {
+      return payload.map(item => this.sanitizeMcpResult(item));
+    }
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (typeof value === 'string' && key.toLowerCase().includes('base64')) {
+        sanitized[key] = `[omitted base64: ${value.length} chars]`;
+      } else if (typeof value === 'object' && value !== null) {
+        sanitized[key] = this.sanitizeMcpResult(value);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+    return sanitized;
   }
 
   /**
