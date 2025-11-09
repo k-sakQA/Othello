@@ -464,6 +464,7 @@ class OthelloReporter {
                 <th>観点</th>
                 <th>結果</th>
                 <th>実行時間</th>
+                <th>エラー</th>
               </tr>
             </thead>
             <tbody>
@@ -477,6 +478,7 @@ class OthelloReporter {
                     : '<span class="badge badge-danger">❌ 失敗</span>'}
                 </td>
                 <td>${result.duration_ms ? this.formatDuration(result.duration_ms) : '-'}</td>
+                <td>${result.error || '-'}</td>
               </tr>
               `).join('')}
             </tbody>

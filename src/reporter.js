@@ -160,8 +160,28 @@ class Reporter {
    */
   async generateHTML(data) {
     // summaryがない場合はdataオブジェクト全体から生成（executionResults, coverageを含む）
-    const summary = data.summary || this.createSummaryFromResults(data, data.iterations || 1);
+    const summary = data.summary
+      ? { ...data.summary }
+      : this.createSummaryFromResults(data, data.iterations || 1);
+
+    // executionResultsがsummaryに含まれていない/不足している場合は、生データから補完
+    if ((!summary.executionResults || summary.executionResults.length === 0) && Array.isArray(data.executionResults)) {
+      summary.executionResults = data.executionResults;
+    }
+
+    // テスト数・成功/失敗数も不足していれば補完
+    if (summary.executionResults && (!summary.total_tests || summary.total_tests === 0)) {
+      summary.total_tests = summary.executionResults.length;
+    }
+    if (summary.executionResults && summary.tests_passed === undefined) {
+      summary.tests_passed = summary.executionResults.filter(r => r && r.success === true).length;
+    }
+    if (summary.executionResults && summary.tests_failed === undefined) {
+      summary.tests_failed = summary.executionResults.length - summary.tests_passed;
+    }
+
     const formattedSummary = this.formatSummary(summary);
+    const executionResults = summary.executionResults || data.executionResults || [];
     // iterationsが数値の場合は空配列、配列の場合はそのまま使用
     const iterationsArray = Array.isArray(data.iterations) ? data.iterations : [];
     const formattedIterations = iterationsArray.map(iter => 
@@ -402,9 +422,9 @@ class Reporter {
     </div>
     `).join('')}
 
-    ${summary.executionResults && summary.executionResults.length > 0 ? `
+    ${executionResults && executionResults.length > 0 ? `
     <h2>📝 テスト詳細</h2>
-    ${summary.executionResults.map(result => `
+    ${executionResults.map(result => `
     <div class="iteration ${result.success ? 'success' : 'partial'}" style="margin-bottom: 15px;">
       <div class="iteration-header">
         <div class="iteration-title">${result.test_case_id || 'N/A'}</div>
@@ -448,7 +468,7 @@ class Reporter {
       ` : '<div style="padding: 10px; background: white; border-radius: 5px; margin-top: 10px; color: #7f8c8d;">テスト内容の詳細情報がありません</div>'}
       ${result.error ? `
       <div style="padding: 10px; background: #f8d7da; border-radius: 5px; margin-top: 10px; color: #721c24;">
-        <strong>エラー:</strong> ${result.error.message || 'エラーメッセージなし'}
+        <strong>エラー:</strong> ${typeof result.error === 'string' ? result.error : (result.error.message || 'エラーメッセージなし')}
       </div>
       ` : ''}
       <div style="padding: 5px 10px; font-size: 0.9em; color: #7f8c8d;">
