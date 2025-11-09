@@ -413,7 +413,7 @@ node bin/othello.js \
 - 狙うバグ（欠陥仮定）
 - 優先度（P0/P1/P2/P3）
 
-**参考例**: ウェブサイトテスト向けの観点CSVサンプルは `docs/hotel-site-test-matrix.csv` にあります。
+**参考例**: ウェブサイトテスト向けの観点CSVサンプルは `docs/test-matrix.csv` にあります。
 
 ### 保存される成果物
 

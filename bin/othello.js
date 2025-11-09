@@ -43,7 +43,7 @@ function setupCLI() {
       demandOption: true
     })
     .option('max-iterations', {
-      alias: 'm',
+      alias: ['m', 'iterations'],
       type: 'string',
       description: 'Maximum number of test iterations',
       default: '10'
@@ -71,7 +71,7 @@ function setupCLI() {
       default: './reports'
     })
     .option('test-aspects-csv', {
-      alias: 't',
+      alias: ['t', 'test-aspects'],
       type: 'string',
       description: 'Path to test aspects CSV file'
     })
@@ -100,6 +100,7 @@ function setupCLI() {
       default: false
     })
     .option('llm-provider', {
+      alias: ['llm'],
       type: 'string',
       description: 'LLM provider (openai, claude, mock)',
       default: process.env.LLM_PROVIDER || 'mock',
@@ -227,12 +228,13 @@ function validateConfig(config) {
 
 // メイン処理
 async function main() {
+  let argv;
   try {
     console.log('\n🎭 Othello - Playwright E2E Test Automation');
     console.log('==========================================\n');
 
     // CLI引数をパース
-    const argv = setupCLI();
+    argv = setupCLI();
 
     // 設定の構築
     let config = {
@@ -241,7 +243,7 @@ async function main() {
       coverageTarget: argv['coverage-target'],
       autoHeal: argv['auto-heal'],
       outputDir: argv.output,
-      testAspectsCsv: argv['test-aspects-csv'],
+      testAspectsCSV: argv['test-aspects-csv'],
       browser: argv.browser,
       headless: argv.headless,
       verbose: argv.verbose,
@@ -261,6 +263,11 @@ async function main() {
         console.error(`❌ Failed to load config file: ${error.message}`);
         process.exit(1);
       }
+    }
+
+    // testAspectsCSV プロパティの表記ゆれを吸収
+    if (!config.testAspectsCSV && config.testAspectsCsv) {
+      config.testAspectsCSV = config.testAspectsCsv;
     }
     
     // バリデーション
@@ -411,7 +418,7 @@ test('Fixed test', async ({ page }) => {
       timeout_seconds: 30,
       max_iterations: config.maxIterations,
       paths: {
-        test_aspects_csv: config.testAspectsCsv || './data/test-aspects.csv',
+        test_aspects_csv: config.testAspectsCSV || config.testAspectsCsv || './data/test-aspects.csv',
         logs: path.join(config.outputDir, 'logs'),
         results: path.join(config.outputDir, 'results'),
         test_instructions: path.join(config.outputDir, 'test_instructions'),
@@ -529,7 +536,7 @@ test('Fixed test', async ({ page }) => {
     
   } catch (error) {
     console.error('\n❌ Fatal error:', error.message);
-    if (argv.verbose) {
+    if (argv?.verbose) {
       console.error(error.stack);
     }
     process.exit(1);

@@ -56,14 +56,24 @@ class OthelloPlanner {
       const majorValue = Object.keys(row).find(k => k.includes('テストタイプ中分類'));
       const minorValue = Object.keys(row).find(k => k.includes('テストタイプ小分類'));
       const aspectValue = Object.keys(row).find(k => k.includes('テスト観点'));
+      const priorityValue = Object.keys(row).find(k => k.includes('優先度'));
+      const targetStructureValue = Object.keys(row).find(k => k.includes('対象の機能構造'));
+      const specExampleValue = Object.keys(row).find(k => k.includes('考慮すべき仕様'));
+      const bugAssumptionValue = Object.keys(row).find(k => k.includes('狙うバグ') || k.includes('欠陥仮定'));
       
-      return {
+      const aspect = {
         aspect_no: parseInt(noValue, 10) || index + 1,
         quality_characteristic: qualityValue ? row[qualityValue] : '',
         test_type_major: majorValue ? row[majorValue] : '',
         test_type_minor: minorValue ? row[minorValue] : '',
-        test_aspect: aspectValue ? row[aspectValue] : ''
+        test_aspect: aspectValue ? row[aspectValue] : '',
+        priority: priorityValue ? row[priorityValue] : 'P2',
+        target_structure: targetStructureValue ? row[targetStructureValue] : '',
+        spec_examples: specExampleValue ? row[specExampleValue] : '',
+        bug_assumption: bugAssumptionValue ? row[bugAssumptionValue] : ''
       };
+      
+      return aspect;
     }).filter(aspect => 
       // 空のエントリを除外（テストタイプまたは観点があるもののみ）
       aspect.test_type_major || aspect.test_aspect
@@ -73,19 +83,46 @@ class OthelloPlanner {
   }
 
   prioritizeAspects(aspects, existingCoverage, uncoveredAspects = []) {
-    // Phase 9: 未カバー観点を優先
+    // 優先度の順序定義（P0 > P1 > P2 > P3 > N/A）
+    const priorityOrder = { 'P0': 0, 'P1': 1, 'P2': 2, 'P3': 3, 'N/A': 4 };
+    
+    // 優先度でソート
+    const sortByPriority = (a, b) => {
+      const aPriority = priorityOrder[a.priority] ?? 99;
+      const bPriority = priorityOrder[b.priority] ?? 99;
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority;
+      }
+      // 同じ優先度の場合は観点番号順
+      return a.aspect_no - b.aspect_no;
+    };
+    
+    // Phase 9: 未カバー観点を優先し、その中で優先度順にソート
     if (uncoveredAspects.length > 0) {
-      // 未カバーの観点番号に対応するテスト観点を優先
-      const priority = aspects.filter(a => uncoveredAspects.includes(a.aspect_no));
-      const others = aspects.filter(a => !uncoveredAspects.includes(a.aspect_no));
-      return [...priority, ...others].slice(0, 10);
+      // 未カバーの観点を優先度順にソート
+      const uncoveredSorted = aspects
+        .filter(a => uncoveredAspects.includes(a.aspect_no))
+        .sort(sortByPriority);
+      
+      // カバー済みの観点も優先度順にソート
+      const coveredSorted = aspects
+        .filter(a => !uncoveredAspects.includes(a.aspect_no))
+        .sort(sortByPriority);
+      
+      return [...uncoveredSorted, ...coveredSorted].slice(0, 10);
     }
     
-    // 従来のロジック
+    // 従来のロジック: 未テスト観点を優先し、優先度順にソート
     const tested = existingCoverage?.aspectCoverage?.tested_aspects || [];
-    const untested = aspects.filter(a => !tested.includes(a.aspect_no));
+    const untested = aspects
+      .filter(a => !tested.includes(a.aspect_no))
+      .sort(sortByPriority);
     
-    const prioritized = [...untested, ...aspects.filter(a => tested.includes(a.aspect_no))];
+    const testedSorted = aspects
+      .filter(a => tested.includes(a.aspect_no))
+      .sort(sortByPriority);
+    
+    const prioritized = [...untested, ...testedSorted];
     return prioritized.slice(0, 10);
   }
 
@@ -121,7 +158,7 @@ class OthelloPlanner {
       targetAspectId 
     });
     
-    const testCases = this.extractTestCases(analysis);
+    const testCases = this.extractTestCases(analysis, priorityAspects);
     const markdown = this.formatAsMarkdown(analysis);
     
     return { iteration, aspects: priorityAspects, analysis, testCases, markdown };
@@ -137,19 +174,41 @@ class OthelloPlanner {
         { role: 'user', content: prompt }
       ],
       temperature: 0.7,
-      maxTokens: 4000
+      maxTokens: 8000
     });
     
     return this.parseAnalysisResponse(response.content);
   }
 
   buildAnalysisPrompt({ url, aspects, existingCoverage, iteration, specifications, targetAspectId }) {
-    const aspectsList = aspects.map(a => `No.${a.aspect_no}: ${a.test_type_major}${a.test_type_minor ? ' - ' + a.test_type_minor : ''}\n観点: ${a.test_aspect}`).join('\n\n');
+    // 観点リストを詳細情報付きで生成
+    const aspectsList = aspects.map(a => {
+      let aspectInfo = `No.${a.aspect_no}: ${a.test_type_major}${a.test_type_minor ? ' - ' + a.test_type_minor : ''}\n観点: ${a.test_aspect}`;
+      
+      // 追加情報があれば含める
+      if (a.priority) {
+        aspectInfo += `\n優先度: ${a.priority}`;
+      }
+      if (a.target_structure) {
+        aspectInfo += `\n対象機能: ${a.target_structure}`;
+      }
+      if (a.spec_examples) {
+        aspectInfo += `\n仕様例:\n${a.spec_examples}`;
+      }
+      if (a.bug_assumption) {
+        aspectInfo += `\n狙うバグ: ${a.bug_assumption}`;
+      }
+      
+      return aspectInfo;
+    }).join('\n\n');
     
     // targetAspectIdが指定されている場合の特別なメッセージ
     const targetAspectMessage = targetAspectId !== undefined && targetAspectId !== null
       ? `\n\n【重要】今回は観点 No.${targetAspectId} のテストケースのみを生成してください。他の観点は無視してください。`
       : '';
+    
+    // CSVが詳細分析済み（test-matrix.csv）か汎用テンプレート（test-ViewpointList-simple.csv）かを判定
+    const hasDetailedInfo = aspects.some(a => a.priority || a.target_structure || a.spec_examples || a.bug_assumption);
     
     // 仕様書がある場合とない場合で分岐
     if (specifications) {
@@ -171,17 +230,32 @@ ${specifications}
 ${aspectsList}${targetAspectMessage}
 
 【タスク】
-**仕様書**を読んで、各テスト観点について日本語でテスト分析を行ってください：
+${hasDetailedInfo 
+  ? `**このテスト観点リストはすでに人間が対象サイトに対して分析済みです。**
+観点リストに記載された「対象機能」「仕様例」「狙うバグ」「優先度」の情報を**そのまま活用**してテストケースを生成してください。
 
-1. **対象の機能構造**: 仕様書に記載されているどの機能・画面が該当するか
-2. **考慮すべき仕様の具体例**: 仕様書から抽出した具体的な仕様（3-5個）
-3. **狙うバグ**: この観点で見つけるべきバグの種類（2-3個）
-4. **テストケース**: 仕様書に基づく具体的なテスト手順と期待結果（1-2ケース）
+1. **対象の機能構造**: 観点リストの「対象機能」をそのまま使用
+2. **考慮すべき仕様の具体例**: 観点リストの「仕様例」をそのまま使用（3-5個）
+3. **狙うバグ**: 観点リストの「狙うバグ」をそのまま使用（2-3個）
+4. **テストケース**: 仕様例と狙うバグを考慮した、具体的なテスト手順と期待結果（1-2ケース）
 
-**重要**: サイトを探索せず、仕様書の内容のみに基づいてテスト分析を行ってください。
+**CRITICAL**: 
+- 観点リストの情報を**変更せず**にそのまま使用してください
+- priorityフィールドには観点リストに記載された優先度を**必ず**そのまま設定してください
+- サイトを探索せず、仕様書と観点リストの情報のみに基づいて分析してください`
+  : `**このテスト観点リストは汎用テンプレートです。**
+対象サイトを分析して、各観点に対する具体的な機能、仕様、狙うバグを特定してください。
+
+1. **対象の機能構造**: 仕様書から該当する機能・画面を特定
+2. **考慮すべき仕様の具体例**: 仕様書から具体的な仕様を抽出（3-5個）
+3. **狙うバグ**: この観点で見つけるべきバグの種類を考える（2-3個）
+4. **テストケース**: 仕様例と狙うバグを考慮した、具体的なテスト手順と期待結果（1-2ケース）
+
+**重要**: 
+- サイトを探索せず、仕様書の情報のみに基づいて分析してください`}
 
 【出力形式】
-JSON配列で出力してください：
+JSON配列で出力してください。**各observationのpriorityフィールドには、必ず上記【テスト観点リスト】に記載された当該観点の優先度をそのまま設定してください。**
 
 \`\`\`json
 [
@@ -192,7 +266,7 @@ JSON配列で出力してください：
     "target_function": "...",
     "specifications": ["...", "..."],
     "target_bugs": ["...", "..."],
-    "priority": "P0",
+    "priority": "（当該観点の優先度をそのまま設定: 観点1ならP0）",
     "test_cases": [
       {
         "case_id": "TC001",
@@ -203,7 +277,9 @@ JSON配列で出力してください：
     ]
   }
 ]
-\`\`\``;
+\`\`\`
+
+**CRITICAL: priorityは上記テスト観点リストの各観点に記載された値をそのまま使ってください。例えば観点1の優先度はP0、観点2の優先度はP0、観点3の優先度はP1です。絶対に独自判断で変更しないでください。**`;
     } else {
       // 仕様書がない場合は従来通りサイト探索モード
       return `あなたはテスト分析の専門家です。
@@ -221,15 +297,57 @@ ${existingCoverage ? JSON.stringify(existingCoverage, null, 2) : 'なし'}
 ${aspectsList}${targetAspectMessage}
 
 【タスク】
-各テスト観点について、以下を分析してください：
+${hasDetailedInfo
+  ? `**このテスト観点リストはすでに人間が対象サイトに対して分析済みです。**
+観点リストに記載された「対象機能」「仕様例」「狙うバグ」「優先度」の情報を**そのまま活用**してテストケースを生成してください。
+
+1. **対象の機能構造**: 観点リストの「対象機能」をそのまま使用
+2. **考慮すべき仕様の具体例**: 観点リストの「仕様例」をそのまま使用（3-5個）
+3. **狙うバグ**: 観点リストの「狙うバグ」をそのまま使用（2-3個）
+4. **テストケース**: 仕様例と狙うバグを考慮した、具体的なテスト手順と期待結果（1-2ケース）
+
+**CRITICAL**: 
+- 観点リストの情報を**変更せず**にそのまま使用してください
+- priorityフィールドには観点リストに記載された優先度を**必ず**そのまま設定してください`
+  : `**このテスト観点リストは汎用テンプレートです。**
+対象サイトを分析して、各観点に対する具体的な機能、仕様、狙うバグ、優先度を特定してください。
 
 1. **対象の機能構造**: このシステムのどの画面・機能・要素が該当するか
 2. **考慮すべき仕様の具体例**: このシステム固有の具体的な仕様（3-5個）
 3. **狙うバグ**: この観点で見つけるべきバグの種類（2-3個）
-4. **テストケース**: 具体的なテスト手順と期待結果（1-2ケース）
+4. **優先度**: この観点の重要度（P0: 必須/P1: 高/P2: 中/P3: 低）を判断
+5. **テストケース**: 仕様例と狙うバグを考慮した、具体的なテスト手順と期待結果（1-2ケース）
+
+**重要**: サイトの実際の機能を分析して、観点に合わせた具体的なテスト設計を行ってください`}
 
 【出力形式】
-JSON配列で出力してください：
+${hasDetailedInfo
+  ? `JSON配列で出力してください。**各観点のpriorityフィールドには、必ず上記【テスト観点リスト】に記載された当該観点の優先度をそのまま設定してください。**
+
+\`\`\`json
+[
+  {
+    "aspect_no": 1,
+    "test_type": "表示（UI）",
+    "test_category": "レイアウト/文言",
+    "target_function": "...",
+    "specifications": ["...", "..."],
+    "target_bugs": ["...", "..."],
+    "priority": "（当該観点の優先度をそのまま設定: 観点1ならP0）",
+    "test_cases": [
+      {
+        "case_id": "TC001",
+        "title": "...",
+        "steps": ["..."],
+        "expected_results": ["..."]
+      }
+    ]
+  }
+]
+\`\`\`
+
+**CRITICAL: priorityは上記テスト観点リストの各観点に記載された値をそのまま使ってください。例えば観点1の優先度はP0、観点2の優先度はP0、観点3の優先度はP1です。絶対に独自判断で変更しないでください。**`
+  : `JSON配列で出力してください：
 
 \`\`\`json
 [
@@ -251,7 +369,9 @@ JSON配列で出力してください：
     ]
   }
 ]
-\`\`\``;
+\`\`\`
+
+**CRITICAL: priorityフィールドには、各観点の重要度を分析して適切な優先度（P0: 必須/P1: 高/P2: 中/P3: 低/N/A: 該当なし）を設定してください。**`}`;
     }
   }
 
@@ -268,19 +388,31 @@ JSON配列で出力してください：
     }
   }
 
-  extractTestCases(analysis) {
+  extractTestCases(analysis, aspectsWithPriority = []) {
     const testCases = [];
+    
+    // aspect_noをキーとしたマップを作成（優先度の高速検索用）
+    const aspectMap = new Map();
+    aspectsWithPriority.forEach(a => {
+      aspectMap.set(a.aspect_no, a);
+    });
+    
     for (const aspect of analysis) {
       for (const testCase of aspect.test_cases || []) {
         // LLMからの出力(case_id, title)をOrchestrator/Reporterが期待する形式(test_case_id, description)に変換
         const { case_id, title, ...rest } = testCase;
+        
+        // 元のaspect情報から優先度を取得（LLM応答の優先度は信頼しない）
+        const originalAspect = aspectMap.get(aspect.aspect_no);
+        const priority = (originalAspect && originalAspect.priority) ? originalAspect.priority : 'P2';
+        
         testCases.push({
           test_case_id: case_id,  // case_id → test_case_id
           description: title,     // title → description
           ...rest,
           aspect_no: aspect.aspect_no,
           test_type: aspect.test_type,
-          priority: aspect.priority || 'P2'
+          priority: priority
         });
       }
     }

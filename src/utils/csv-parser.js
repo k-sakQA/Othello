@@ -8,11 +8,11 @@
  */
 
 /**
- * CSV文字列をオブジェクト配列にパースする
+ * CSV文字列をオブジェクト配列にパースする（RFC 4180対応）
  * 
  * 特徴:
  * - ヘッダー行をキーとして使用
- * - クォート内のカンマを正しく処理
+ * - クォート内のカンマ・改行を正しく処理
  * - 空白文字を自動トリム
  * - 空のCSVは空配列を返す
  * 
@@ -25,33 +25,36 @@
  * // => [{ Name: 'Alice', Age: '30' }]
  */
 function parseCSV(csvContent) {
-  if (!csvContent || csvContent.trim() === '') {
+  if (!csvContent) {
     return [];
   }
 
-  const lines = csvContent.split(/\r?\n/).filter(line => line.trim() !== '');
-  
-  if (lines.length === 0) {
+  const normalized = csvContent.replace(/^\uFEFF/, '');
+  if (normalized.trim() === '') {
     return [];
   }
 
-  // ヘッダー行を解析
-  const headers = parseLine(lines[0]);
-  
-  if (lines.length === 1) {
+  const rows = tokenizeCSV(normalized);
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const headers = rows[0];
+  if (rows.length === 1) {
     return []; // ヘッダーのみ
   }
 
-  // データ行を解析
   const result = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseLine(lines[i]);
+  for (let i = 1; i < rows.length; i++) {
+    const values = rows[i];
+    if (values.every(value => value === '')) {
+      continue; // 空行は無視
+    }
+
     const row = {};
-    
     headers.forEach((header, index) => {
-      row[header] = values[index] || '';
+      row[header] = values[index] ?? '';
     });
-    
     result.push(row);
   }
 
@@ -59,47 +62,64 @@ function parseCSV(csvContent) {
 }
 
 /**
- * CSV行を値配列にパースする（クォート対応）
- * 
- * RFC 4180準拠:
- * - ダブルクォートで囲まれた値内のカンマを無視
- * - エスケープされたクォート（""）を処理
+ * CSV全体をRFC 4180準拠でトークン化する
  * 
  * @private
- * @param {string} line - CSV行
- * @returns {Array<string>} 値配列
+ * @param {string} content - 正規化済みCSV文字列
+ * @returns {Array<Array<string>>} 行列
  */
-function parseLine(line) {
-  const values = [];
+function tokenizeCSV(content) {
+  const rows = [];
+  let currentRow = [];
   let currentValue = '';
   let insideQuotes = false;
 
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const nextChar = line[i + 1];
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    const nextChar = content[i + 1];
 
     if (char === '"') {
       if (insideQuotes && nextChar === '"') {
-        // エスケープされたクォート
         currentValue += '"';
-        i++; // 次の文字をスキップ
+        i++; // エスケープされたクォートをスキップ
       } else {
-        // クォートの開始/終了
         insideQuotes = !insideQuotes;
       }
-    } else if (char === ',' && !insideQuotes) {
-      // カンマ区切り
-      values.push(currentValue.trim());
-      currentValue = '';
-    } else {
-      currentValue += char;
+      continue;
     }
+
+    if (char === ',' && !insideQuotes) {
+      currentRow.push(currentValue.trim());
+      currentValue = '';
+      continue;
+    }
+
+    if ((char === '\n' || char === '\r') && !insideQuotes) {
+      currentRow.push(currentValue.trim());
+      currentValue = '';
+
+      if (currentRow.length && !currentRow.every(value => value === '')) {
+        rows.push(currentRow);
+      }
+      currentRow = [];
+
+      if (char === '\r' && nextChar === '\n') {
+        i++; // CRLFの\nをスキップ
+      }
+      continue;
+    }
+
+    currentValue += char;
   }
 
-  // 最後の値を追加
-  values.push(currentValue.trim());
+  if (currentValue.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentValue.trim());
+  }
+  if (currentRow.length && !currentRow.every(value => value === '')) {
+    rows.push(currentRow);
+  }
 
-  return values;
+  return rows;
 }
 
 /**

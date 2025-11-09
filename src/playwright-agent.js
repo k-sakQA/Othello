@@ -747,12 +747,13 @@ class Othello {
         type: options.type || 'png'
       });
 
-      console.log(`🔧 [PlaywrightAgent] MCP Result:`, JSON.stringify(mcpResult, null, 2));
+      const sanitizedResult = this.sanitizeMcpPayload(mcpResult);
+      console.log(`🔧 [PlaywrightAgent] MCP Result (sanitized):`, JSON.stringify(sanitizedResult, null, 2));
 
       await this.logExecution('info', 'screenshot', {
         filename,
         success: mcpResult.success,
-        result: mcpResult
+        result: sanitizedResult
       });
 
       return mcpResult;
@@ -764,6 +765,32 @@ class Othello {
       });
       throw error;
     }
+  }
+  /**
+   * MCPレスポンス内の巨大なbase64データをマスクしてログ可読性を保つ
+   * @param {any} payload
+   * @returns {any}
+   */
+  sanitizeMcpPayload(payload) {
+    if (!payload || typeof payload !== 'object') {
+      return payload;
+    }
+
+    if (Array.isArray(payload)) {
+      return payload.map(item => this.sanitizeMcpPayload(item));
+    }
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (typeof value === 'string' && key.toLowerCase().includes('base64')) {
+        sanitized[key] = `[omitted base64: ${value.length} chars]`;
+      } else if (typeof value === 'object' && value !== null) {
+        sanitized[key] = this.sanitizeMcpPayload(value);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+    return sanitized;
   }
 
   /**
