@@ -404,14 +404,26 @@ class Analyzer {
     
     // 2. 未カバー観点から推奨を生成（失敗テストと合わせて最大5件まで）
     const remainingSlots = maxRecommendations - recommendations.length;
-    
+
     if (remainingSlots > 0 && coverageData.uncovered_aspects && coverageData.uncovered_aspects.length > 0) {
       const uncoveredAspects = coverageData.uncovered_aspects.slice(0, remainingSlots);
-      
-      for (const aspectId of uncoveredAspects) {
+
+      for (let i = 0; i < uncoveredAspects.length; i++) {
+        const aspectId = uncoveredAspects[i];
+
+        // 優先度を動的に設定
+        let priority;
+        if (i < 2) {
+          priority = 'High';   // 最初の2つは高優先度
+        } else if (i < 4) {
+          priority = 'Medium'; // 次の2つは中優先度
+        } else {
+          priority = 'Low';    // 残りは低優先度
+        }
+
         recommendations.push({
           type: 'uncovered',
-          priority: 'High',
+          priority: priority,
           title: `観点${aspectId}のテスト`,
           reason: `未カバー観点: 観点${aspectId}`,
           aspectId: aspectId
