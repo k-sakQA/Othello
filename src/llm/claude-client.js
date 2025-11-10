@@ -22,6 +22,7 @@ class ClaudeClient {
     this.maxTokens = config.maxTokens || 4000;
     this.temperature = config.temperature || 0.7;
     this.baseUrl = 'https://api.anthropic.com/v1/messages';
+    this.apiVersion = config.apiVersion || '2023-06-01';
   }
 
   /**
@@ -36,23 +37,40 @@ class ClaudeClient {
     const { messages, temperature, maxTokens } = options;
     
     try {
-      const response = await axios.post(this.baseUrl, {
+      // systemメッセージを分離
+      const systemMessage = messages.find(m => m.role === 'system');
+      const userMessages = messages.filter(m => m.role !== 'system');
+      
+      const requestBody = {
         model: this.model,
         max_tokens: maxTokens || this.maxTokens,
         temperature: temperature !== undefined ? temperature : this.temperature,
-        messages
-      }, {
+        messages: userMessages
+      };
+      
+      // systemメッセージがあれば追加
+      if (systemMessage) {
+        requestBody.system = systemMessage.content;
+      }
+      
+      const response = await axios.post(this.baseUrl, requestBody, {
         headers: {
           'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01',
+          'anthropic-version': this.apiVersion,
           'content-type': 'application/json'
-        }
+        },
+        timeout: 60000
       });
       
       return {
         content: response.data.content[0].text
       };
     } catch (error) {
+      // より詳細なエラー情報を出力
+      if (error.response) {
+        const details = error.response.data || error.response.statusText;
+        throw new Error(`Claude API error (${error.response.status}): ${JSON.stringify(details)}`);
+      }
       throw new Error(`Claude API error: ${error.message}`);
     }
   }

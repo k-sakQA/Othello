@@ -58,6 +58,31 @@ class OthelloHealer {
    * @returns {Object} 修復結果
    */
   async heal(failureData) {
+    // まずヒューリスティックで解決可能か確認
+    const heuristicResult = this.applyHeuristicRules(failureData);
+    if (heuristicResult) {
+      const fixedInstructions = this.applyFix(
+        failureData.instructions,
+        heuristicResult.fix
+      );
+
+      const changes = this.extractChanges(
+        failureData.instructions,
+        fixedInstructions,
+        heuristicResult.fix
+      );
+
+      return {
+        success: true,
+        is_bug: false,
+        fixed_instructions: fixedInstructions,
+        changes,
+        root_cause: heuristicResult.root_cause,
+        confidence: heuristicResult.confidence || 0.7,
+        heuristic_rule: heuristicResult.rule
+      };
+    }
+
     // まず分析
     const analysis = await this.analyze(failureData);
 
@@ -306,6 +331,76 @@ JSON形式で出力してください：
   }
 
   /**
+   * ルールベースの修復を試みる
+   * @param {Object} failureData
+   * @returns {Object|null}
+   */
+  applyHeuristicRules(failureData) {
+    const rules = [this.replaceFillOnSelectRule.bind(this)];
+
+    for (const rule of rules) {
+      const result = rule(failureData);
+      if (result) {
+        return result;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * selectタグにfillを使っている場合の修復ルール
+   * @param {Object} failureData
+   * @returns {Object|null}
+   */
+  replaceFillOnSelectRule(failureData) {
+    if (!failureData || !Array.isArray(failureData.instructions) || !failureData.error) {
+      return null;
+    }
+
+    const message = (failureData.error.message || '').toLowerCase();
+    const notInputOrTextarea = message.includes('element is not an <input') || message.includes('textarea');
+    const containsSelectTag = message.includes('<select');
+    const locatorFillError = message.includes('locator.fill');
+
+    if (!(notInputOrTextarea && containsSelectTag && locatorFillError)) {
+      return null;
+    }
+
+    const targetIndex =
+      failureData.error.instruction_index !== undefined
+        ? failureData.error.instruction_index
+        : failureData.instructions.findIndex(inst => inst.type === 'fill');
+
+    if (targetIndex === -1) {
+      return null;
+    }
+
+    const targetInstruction = failureData.instructions[targetIndex];
+    if (!targetInstruction || targetInstruction.type !== 'fill') {
+      return null;
+    }
+
+    const optionValue = targetInstruction.value || targetInstruction.text;
+    if (!optionValue) {
+      return null;
+    }
+
+    return {
+      rule: 'select_fill_to_select_option',
+      root_cause: 'select要素にfillを使用していたためPlaywrightが失敗しました。selectOptionに切り替える必要があります。',
+      confidence: 0.75,
+      fix: {
+        type: 'convert_select_fill',
+        instruction_index: targetIndex,
+        values: Array.isArray(optionValue) ? optionValue : [optionValue],
+        selector: targetInstruction.selector,
+        ref: targetInstruction.ref
+      }
+    };
+  }
+
+  /**
    * LLMレスポンスを解析
    * @param {string} content - LLMレスポンス
    * @returns {Object} 解析結果
@@ -400,6 +495,24 @@ JSON形式で出力してください：
         }
         break;
 
+      case 'convert_select_fill':
+        if (fix.instruction_index !== undefined) {
+          const instruction = updated[fix.instruction_index];
+          if (instruction) {
+            instruction.type = 'select_option';
+            const values = Array.isArray(fix.values)
+              ? fix.values
+              : fix.values
+                ? [fix.values]
+                : instruction.value
+                  ? [instruction.value]
+                  : [];
+            instruction.values = values;
+            delete instruction.value;
+          }
+        }
+        break;
+
       default:
         throw new Error(`Unknown fix type: ${fix.type}`);
     }
@@ -474,6 +587,15 @@ JSON形式で出力してください：
           type: 'add_wait',
           instruction_index: fix.instruction_index,
           wait_time: fix.wait_time || 1
+        });
+        break;
+
+      case 'convert_select_fill':
+        changes.push({
+          type: 'convert_select_fill',
+          instruction_index: fix.instruction_index,
+          new_type: 'select_option',
+          values: fix.values
         });
         break;
     }

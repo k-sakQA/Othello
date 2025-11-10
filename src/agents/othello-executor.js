@@ -130,9 +130,13 @@ class OthelloExecutor {
       'navigate',
       'click',
       'fill',
+      'select_option',
       'wait',
+      'wait_for',
       'press_key',
-      'screenshot'
+      'screenshot',
+      'verify_text_visible',
+      'verify_element_visible'
     ];
 
     if (!supportedTypes.includes(instruction.type)) {
@@ -157,6 +161,10 @@ class OthelloExecutor {
         case 'fill':
           othelloInstruction.selector = instruction.ref || instruction.selector;
           othelloInstruction.value = instruction.value || instruction.text;
+          break;
+        case 'select_option':
+          othelloInstruction.selector = instruction.ref || instruction.selector;
+          othelloInstruction.values = instruction.values || (instruction.value ? [instruction.value] : []);
           break;
         case 'verify_text_visible':
           othelloInstruction.text = instruction.text;
@@ -224,6 +232,14 @@ class OthelloExecutor {
           element: intent,
           ref: instruction.ref || instruction.selector,
           text: instruction.value,
+          intent
+        };
+
+      case 'select_option':
+        return {
+          element: intent,
+          ref: instruction.ref || instruction.selector,
+          values: instruction.values || (instruction.value ? [instruction.value] : []),
           intent
         };
 

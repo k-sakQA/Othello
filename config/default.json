@@ -3,6 +3,11 @@
   "timeout_seconds": 60,
   "max_iterations": 10,
   "screenshot_on_error": true,
+  "llmRequestIntervalMs": 1000,
+  "llmRateLimitRetry": {
+    "maxRetries": 3,
+    "retryDelayMs": 10000
+  },
   "paths": {
     "logs": "./logs",
     "results": "./results",

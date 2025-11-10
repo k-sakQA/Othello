@@ -61,7 +61,19 @@ class Othello {
 
     try {
       // 指示タイプの検証
-      const validTypes = ['navigate', 'click', 'fill', 'screenshot', 'evaluate', 'wait', 'press_key'];
+      const validTypes = [
+        'navigate',
+        'click',
+        'fill',
+        'select_option',
+        'screenshot',
+        'evaluate',
+        'wait',
+        'wait_for',
+        'press_key',
+        'verify_element_visible',
+        'verify_text_visible'
+      ];
       if (!validTypes.includes(instruction.type)) {
         const result = {
           success: false,
@@ -511,9 +523,11 @@ class Othello {
         navigate: 'browser_navigate',
         click: 'browser_click',
         fill: 'browser_type',
+        select_option: 'browser_select_option',
         screenshot: 'browser_take_screenshot',
         evaluate: 'browser_evaluate',
         wait: 'browser_wait_for',
+        wait_for: 'browser_wait_for',
         press_key: 'browser_press_key',
         verify_element_visible: 'browser_verify_element_visible',
         verify_text_visible: 'browser_verify_text_visible'
@@ -589,6 +603,14 @@ class Othello {
           intent: intent
         };
 
+      case 'select_option':
+        return {
+          element: intent,
+          ref: instruction.selector,
+          values: instruction.values || (instruction.value ? [instruction.value] : []),
+          intent: intent
+        };
+
       case 'screenshot':
         return {
           filename: instruction.path
@@ -602,7 +624,13 @@ class Othello {
 
       case 'wait':
         return {
-          time: instruction.duration / 1000, // ミリ秒→秒
+          time: instruction.duration ? instruction.duration / 1000 : instruction.time || 1,
+          intent: intent
+        };
+
+      case 'wait_for':
+        return {
+          time: instruction.duration ? instruction.duration / 1000 : instruction.time || 1,
           intent: intent
         };
 

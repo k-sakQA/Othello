@@ -227,6 +227,73 @@ describe('Othello-Healer', () => {
       expect(healed.fixed_instructions[1].selector).toBe('button[type="submit"]');
       expect(healed.changes).toHaveLength(2);
     });
+
+    test('selectタグにfillを使うケースをヒューリスティックで修復できる', async () => {
+      const failureData = {
+        test_case_id: 'TC_SELECT',
+        instructions: [
+          { type: 'navigate', url: 'https://example.com', description: 'ページを開く' },
+          {
+            type: 'fill',
+            selector: 'aria-ref=e52',
+            value: 'メール',
+            description: '確認のご連絡を入力'
+          }
+        ],
+        error: {
+          message: 'Error: locator.fill: Error: Element is not an <input>, <textarea> or [contenteditable] element. locator resolved to <select ...>',
+          instruction_index: 1,
+          instruction_type: 'fill'
+        },
+        snapshot: {}
+      };
+
+      const healed = await healer.heal(failureData);
+
+      expect(healed.success).toBe(true);
+      expect(healed.fixed_instructions[1].type).toBe('select_option');
+      expect(healed.fixed_instructions[1].values).toEqual(['メール']);
+      expect(healed.heuristic_rule).toBe('select_fill_to_select_option');
+      expect(mockLLM.chat).not.toHaveBeenCalled();
+    });
+
+    test('ヒューリスティック条件を満たさない場合はLLMにフォールバックする', async () => {
+      const failureData = {
+        test_case_id: 'TC_NO_SELECT',
+        instructions: [
+          {
+            type: 'fill',
+            selector: 'input#contact',
+            value: 'メール',
+            description: '確認のご連絡を入力'
+          }
+        ],
+        error: {
+          message: 'Error: locator.fill: Element is not an <input>',
+          instruction_index: 0,
+          instruction_type: 'fill'
+        },
+        snapshot: {}
+      };
+
+      mockLLM.chat.mockResolvedValueOnce({
+        content: JSON.stringify({
+          is_bug: false,
+          root_cause: 'セレクタを更新する必要があります',
+          suggested_fix: {
+            type: 'update_selector',
+            instruction_index: 0,
+            new_selector: 'select#contact'
+          }
+        })
+      });
+
+      const healed = await healer.heal(failureData);
+
+      expect(mockLLM.chat).toHaveBeenCalledTimes(1);
+      expect(healed.success).toBe(true);
+      expect(healed.fixed_instructions[0].selector).toBe('select#contact');
+    });
   });
 
   describe('buildAnalysisPrompt', () => {
