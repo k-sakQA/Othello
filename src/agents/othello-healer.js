@@ -360,7 +360,7 @@ JSON形式で出力してください：
 
     const message = (failureData.error.message || '').toLowerCase();
     const notInputOrTextarea = message.includes('element is not an <input') || message.includes('textarea');
-    const containsSelectTag = message.includes('<select');
+    const containsSelectTag = message.includes('<select') || message.includes('&lt;select');
     const locatorFillError = message.includes('locator.fill');
 
     if (!(notInputOrTextarea && containsSelectTag && locatorFillError)) {

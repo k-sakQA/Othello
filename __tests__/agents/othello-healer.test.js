@@ -257,6 +257,34 @@ describe('Othello-Healer', () => {
       expect(mockLLM.chat).not.toHaveBeenCalled();
     });
 
+    test('HTMLエスケープされた<select>情報でもヒューリスティックが発動する', async () => {
+      const failureData = {
+        test_case_id: 'TC_SELECT_HTML',
+        instructions: [
+          { type: 'navigate', url: 'https://example.com', description: 'ページを開く' },
+          {
+            type: 'fill',
+            selector: 'aria-ref=e52',
+            value: 'メール',
+            description: '確認のご連絡を入力'
+          }
+        ],
+        error: {
+          message: 'Error: locator.fill: Error: Element is not an <input>, <textarea> or [contenteditable] element. locator resolved to &lt;select ...>',
+          instruction_index: 1,
+          instruction_type: 'fill'
+        },
+        snapshot: {}
+      };
+
+      const healed = await healer.heal(failureData);
+
+      expect(healed.success).toBe(true);
+      expect(healed.fixed_instructions[1].type).toBe('select_option');
+      expect(healed.heuristic_rule).toBe('select_fill_to_select_option');
+      expect(mockLLM.chat).not.toHaveBeenCalled();
+    });
+
     test('ヒューリスティック条件を満たさない場合はLLMにフォールバックする', async () => {
       const failureData = {
         test_case_id: 'TC_NO_SELECT',
