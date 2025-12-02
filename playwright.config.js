@@ -32,7 +32,10 @@ module.exports = defineConfig({
   use: {
     /* ベースURL（Othelloの--urlで上書き） */
     baseURL: process.env.BASE_URL || 'http://localhost:3000',
-    
+
+    /* 事前ログイン済みのストレージステートを再利用 */
+    storageState: 'auth.json',
+
     /* スクリーンショット設定 */
     screenshot: 'on',
     trace: 'retain-on-failure',

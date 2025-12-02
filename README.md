@@ -34,6 +34,27 @@ npx @playwright/mcp@latest --browser chromium
 
 > **補足**: 初回実行時にはPlaywrightがブラウザモジュールをダウンロードするため時間がかかる場合があります。
 
+#### Playwrightログイン状態のブートストラップをカスタマイズする環境変数
+
+MFAを含む手動ログインでセッションを保存する `scripts/login_setup.ts` は、以下の環境変数で挙動を上書きできます（デフォルトはローカル開発向け）：
+
+| 変数名 | デフォルト | 内容 |
+| --- | --- | --- |
+| `LOGIN_URL` | `http://localhost:3000/login` | 初期表示するログインページURL |
+| `DASHBOARD_URL_PATTERN` | `**/dashboard` | ログイン完了を判定するURLパターン（Playwrightのglobを利用） |
+| `AUTH_STATE_PATH` | `auth.json` | 保存するストレージステートファイルのパス |
+
+例: 本番相当の環境でログインし、保存先を変更する場合
+
+```bash
+LOGIN_URL="https://app.example.com/sign-in" \   # ログインページ
+DASHBOARD_URL_PATTERN="**/app" \                  # ログイン後の到達URL
+AUTH_STATE_PATH="tmp/auth.state.json" \           # 保存先
+npm run login:setup
+```
+
+保存されたステートはPlaywrightの `storageState` として自動で読み込まれるため、次回以降のテスト実行ではログイン画面を経由せずに開始できます。
+
 ### 5. 仕様書の配置（任意）
 
 テスト対象システムの仕様書がある場合は、本プロジェクト直下に `spec` ディレクトリを作成し、その中にMarkdownもしくはテキスト形式で仕様書ファイルを配置してください。

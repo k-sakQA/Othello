@@ -9,6 +9,7 @@ package-lock.json
 test-results/
 playwright-report/
 playwright/.cache/
+auth.json
 
 # Othello出力
 .othello_out/
