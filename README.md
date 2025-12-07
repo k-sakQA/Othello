@@ -34,6 +34,21 @@ npx @playwright/mcp@latest --browser chromium
 
 > **補足**: 初回実行時にはPlaywrightがブラウザモジュールをダウンロードするため時間がかかる場合があります。
 
+#### Android Chromeブラウザでのテスト実行
+
+OthelloはAndroid Chromeブラウザに対応しています。テスト実行時に以下のプロジェクト名を指定することで、Android端末のエミュレーションでテストを実行できます：
+
+- `android-chrome-pixel5`: Pixel 5のエミュレーション
+- `android-chrome-pixel4`: Pixel 4のエミュレーション
+- `android-chrome-galaxy-s9`: Galaxy S9+のエミュレーション
+
+**実行例**：
+```bash
+npx playwright test --project=android-chrome-pixel5
+```
+
+これらのプロジェクトは `playwright.config.js` に定義されており、モバイルビューポート、タッチスクリーン、ユーザーエージェントなどがAndroidデバイスに合わせて自動設定されます。
+
 #### Playwrightログイン状態のブートストラップをカスタマイズする環境変数
 
 MFAを含む手動ログインでセッションを保存する `scripts/login_setup.ts` は、以下の環境変数で挙動を上書きできます（デフォルトはローカル開発向け）：

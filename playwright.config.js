@@ -53,6 +53,29 @@ module.exports = defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
 
+    // Android Chrome（複数のデバイスプロファイル）
+    {
+      name: 'android-chrome-pixel5',
+      use: {
+        ...devices['Pixel 5'],
+        browserName: 'chromium',
+      },
+    },
+    {
+      name: 'android-chrome-pixel4',
+      use: {
+        ...devices['Pixel 4'],
+        browserName: 'chromium',
+      },
+    },
+    {
+      name: 'android-chrome-galaxy-s9',
+      use: {
+        ...devices['Galaxy S9+'],
+        browserName: 'chromium',
+      },
+    },
+
     // 必要に応じて追加のブラウザを有効化
     // {
     //   name: 'firefox',

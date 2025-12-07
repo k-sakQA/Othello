@@ -151,6 +151,21 @@ npx @playwright/mcp@latest --headless --port 8931
 
 **結果**: ✅ 設定ファイル作成済み
 
+### テスト4: Android Chromeプロジェクト設定
+
+**設定ファイル**: `playwright.config.js`
+**プロジェクト**:
+- `android-chrome-pixel5`: Pixel 5エミュレーション
+- `android-chrome-pixel4`: Pixel 4エミュレーション
+- `android-chrome-galaxy-s9`: Galaxy S9+エミュレーション
+
+**実行方法**:
+```bash
+npx playwright test --project=android-chrome-pixel5
+```
+
+**結果**: ✅ Android Chromeプロジェクト設定済み
+
 ---
 
 ## 🚀 次のステップ
@@ -237,6 +252,7 @@ MCP APIからの応答をOthello形式に変換：
 - [x] **Playwright MCP (`@playwright/mcp@0.0.42`) インストール済み** ← NEW!
 - [x] VS Code MCP設定 (`.vscode/settings.json`) 作成済み
 - [x] スタンドアロンモード動作確認済み
+- [x] **Android Chromeブラウザプロジェクト設定 (`playwright.config.js`)** ← NEW!
 - [ ] OthelloとMCPの統合実装（次のフェーズ）
 
 ---
